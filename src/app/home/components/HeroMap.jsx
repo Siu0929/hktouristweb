@@ -988,14 +988,19 @@ export default function HeroMap({
     };
   }, []);
 
-  // Pan to first match on query change
-  const firstMatch = visibleSpots[0];
-  useEffect(() => {
-    if (!mapRef.current || !firstMatch) return;
-    programmaticMoveRef.current = true;
-    mapRef.current.panTo({ lat: firstMatch.lat, lng: firstMatch.lng });
-    mapRef.current.setZoom(Math.max(mapRef.current.getZoom() ?? 14, 18));
-  }, [normalizedQuery]);
+  // (Removed) Auto-pan to first match on every query change.
+  //
+  // Previously this effect watched `normalizedQuery` and called
+  // `map.panTo(firstMatch)` on every keystroke. That made the map
+  // jump around while the user was typing in the search bar, which
+  // made the dropdown choices hard to read and clashed with the intent
+  // of the SearchBar (show a list of results, let the user pick).
+  //
+  // The map now only moves via explicit user actions: clicking a
+  // marker, clicking a cluster chip, recentering on the user, or
+  // picking a frequent place. Search results remain visible on the
+  // map (they're added to `searchResultSpots` and rendered as
+  // markers), so the user can still tap any of them to navigate.
 
   // Clear any in-app route when the bottom sheet is dismissed, so
   // the polyline does not linger after the user closes the panel.
