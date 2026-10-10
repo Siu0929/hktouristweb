@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   Toilet,
-  MapPin,
   Bus,
+  TrainFront,
+  CarTaxiFront,
+  MapPin,
   X,
   Loader2,
   Accessibility,
@@ -14,14 +16,22 @@ import {
 } from "lucide-react";
 import { useLocale, useTranslations } from "@/contexts/LocaleContext";
 import { detectCategoryQuery } from "@/lib/searchCategories";
+import {
+  useLayaVerdict,
+  itemConfidence,
+  LayaSuggestions,
+} from "@/components/SearchBar/LayaSuggestions";
 
 const TYPE_CONFIG = {
   toilet: { icon: Toilet, color: "#0F766E", label: "Toilets" },
+  bus: { icon: Bus, color: "#1E40AF", label: "Bus" },
+  train: { icon: TrainFront, color: "#1E40AF", label: "MTR" },
+  taxi: { icon: CarTaxiFront, color: "#1E40AF", label: "Taxi" },
   attraction: { icon: MapPin, color: "#C2410C", label: "Attractions" },
-  busStop: { icon: Bus, color: "#1D4ED8", label: "Bus Stops" },
 };
 
-const TYPE_ORDER = ["attraction", "toilet", "busStop"];
+const TYPE_ORDER = ["attraction", "toilet", "bus", "train", "taxi"];
+
 const RECENT_SEARCHES_KEY = "hktourist:recent-searches";
 const MAX_RECENT_SEARCHES = 5;
 
@@ -90,7 +100,7 @@ export default function SearchBar({
   const [internalQuery, setInternalQuery] = useState(externalQuery ?? "");
   const query = externalQuery ?? internalQuery;
   const setQuery = onQueryChange ?? setInternalQuery;
-  const [activeTypes, setActiveTypes] = useState(new Set(TYPE_ORDER));
+  const [activeTypes] = useState(new Set(TYPE_ORDER));
   const [results, setResults] = useState(null);
   const [recommended, setRecommended] = useState(null);
   const [categorySearch, setCategorySearch] = useState(null);
@@ -102,6 +112,17 @@ export default function SearchBar({
   const abortRef = useRef(null);
   const [recentSearches, setRecentSearches] = useState([]);
 
+  // Laya verdict — owned by LayaSuggestions; we just consume the
+  // appFunction probabilities here to sort the search-result list,
+  // and the appFunctionChoice + queryType for the Laya button label.
+  const { layaLoading, appFnProbs, appFunctionChoice, queryType } = useLayaVerdict({
+    query,
+    locale,
+    userLocation,
+    recentSearches,
+  });
+
+  // Load recent searches on mount and whenever dropdown opens
   const loadRecentSearches = useCallback(() => {
     setRecentSearches(readRecentSearches());
   }, []);
@@ -203,6 +224,10 @@ export default function SearchBar({
     }
   }, [query, activeTypes, debouncedSearch]);
 
+  // ─── Laya verdict lives in LayaSuggestions — this file just consumes ───
+  // its `appFnProbs` to sort flatResults. Dropdown UI for the four function
+  // buttons is also rendered by LayaSuggestions (see <LayaSuggestions/> below).
+
   useEffect(() => {
     setHighlightedIndex(-1);
   }, [results]);
@@ -221,6 +246,7 @@ export default function SearchBar({
     (e) => {
       if (!isOpen) return;
 
+      // Recent searches keyboard navigation (when no query typed)
       if (!query && hasRecent) {
         const recentLen = recentSearches.length;
         switch (e.key) {
@@ -248,7 +274,20 @@ export default function SearchBar({
         return;
       }
 
-      const flat = getFlatResults(results, activeTypes, recommended);
+      // Results keyboard navigation — mirrors the UI's actual rendering order
+      // (recommended section first, then ranked search results). Reconstructs
+      // the flat list from raw state so this callback can live before the
+      // useMemo definitions of flatResults / rankedResults.
+      const recommendedIds = new Set((recommended ?? []).map((r) => r.id));
+      const rankedRaw = (results ? getFlatResults(results, activeTypes, recommended) : []).filter(
+        (item) => !recommendedIds.has(item.id)
+      );
+      const flat = hasRecommended
+        ? [
+            ...recommended.map((item) => ({ ...item, poiType: categorySearch })),
+            ...rankedRaw,
+          ]
+        : rankedRaw;
       if (flat.length === 0) return;
 
       switch (e.key) {
@@ -272,7 +311,7 @@ export default function SearchBar({
           break;
       }
     },
-    [isOpen, results, highlightedIndex, activeTypes, recommended, recentSearches]
+    [isOpen, results, activeTypes, recommended, categorySearch, highlightedIndex, recentSearches]
   );
 
   const handleSelect = (item) => {
@@ -284,10 +323,14 @@ export default function SearchBar({
     setRecommended(null);
     setCategorySearch(null);
     setIsOpen(false);
+    // Save search term to recent searches
     if (query.trim()) addRecentSearch(query.trim());
     loadRecentSearches();
     inputRef.current?.focus();
   };
+
+  // ── Laya helper (itemConfidence) lives in ──
+  // ── LayaSuggestions — we just call it below to sort flatResults. ──
 
   function getFlatResults(resultsMap, activeTypesSet, recommendedItems) {
     const items = [];
@@ -307,11 +350,63 @@ export default function SearchBar({
     return items;
   }
 
-  const flatResults = results ? getFlatResults(results, activeTypes, recommended) : [];
+  // Sort flatResults by Laya appFunction confidence (desc) when we have a
+  // verdict, so the function the user most likely wants sits at the top of the
+  // list. Items without a confidence fall back to their natural type/distance
+  // order at the bottom.
+  const flatResults = useMemo(() => {
+    const list = results ? getFlatResults(results, activeTypes, recommended) : [];
+    if (!appFnProbs) return list;
+    return list
+      .map((item) => ({ item, conf: itemConfidence(item, appFnProbs) }))
+      .sort((a, b) => {
+        // Both have confidence → high first
+        if (a.conf != null && b.conf != null) return b.conf - a.conf;
+        // Only one has confidence → it wins
+        if (a.conf != null) return -1;
+        if (b.conf != null) return 1;
+        // Neither → keep original order
+        return 0;
+      })
+      .map(({ item, conf }) =>
+        conf != null ? { ...item, _confidence: conf } : item
+      );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results, activeTypes, recommended, categorySearch, appFnProbs]);
+
+  // Recommended items are also part of flatResults (they have poiType =
+  // categorySearch). Filter them out by id so they only render in the
+  // dedicated "Recommended" section above. Without this dedupe they would
+  // show up twice — once at the top of the recommended list and again later
+  // in the main results after the confidence sort shuffles them around.
+  const recommendedIds = useMemo(() => {
+    return new Set((recommended ?? []).map((r) => r.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recommended]);
+  const rankedResults = useMemo(
+    () => flatResults.filter((item) => !recommendedIds.has(item.id)),
+    [flatResults, recommendedIds]
+  );
+
+  // Look up a recommendation item's confidence (it might live in flatResults
+  // already — `recommended` itself isn't tagged). Item confidence is also
+  // injected by the flatResults sort below, so we read it from `_confidence`
+  // when available and otherwise recompute from appFunction.probabilities.
   const hasRecommended = recommended && recommended.length > 0;
   const hasResults = flatResults.length > 0;
   const hasRecent = recentSearches.length > 0;
-  const showDropdown = isOpen && (hasResults || (query && isLoading) || (!query && hasRecent));
+  // LayaSuggestions returns null until appFnProbs is set, so this is also
+  // a safe proxy for "the Laya section has anything to render".
+  const hasFunctionSuggestions = appFnProbs != null;
+  // Dropdown shows while the input is focused whenever there's something
+  // visible: search results, in-flight search, recent searches, or the
+  // Laya-ranked function-suggestion buttons.
+  const showDropdown =
+    isOpen &&
+    (hasResults ||
+      hasFunctionSuggestions ||
+      (query && isLoading) ||
+      (!query && hasRecent));
 
   return (
     <div
@@ -319,6 +414,7 @@ export default function SearchBar({
       className={`relative w-full ${className}`}
       onKeyDown={handleKeyDown}
     >
+      {/* Search Input */}
       <div className="relative flex items-center">
         <div className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400">
           {isLoading ? (
@@ -360,6 +456,7 @@ export default function SearchBar({
         )}
       </div>
 
+      {/* Suggestions Dropdown */}
       {showDropdown && (
         <div
           className="absolute left-0 right-0 top-full mt-2 bg-white rounded-xl border border-zinc-200 shadow-lg z-50 max-h-80 overflow-y-auto"
@@ -371,12 +468,34 @@ export default function SearchBar({
             </div>
           )}
 
-          {!isLoading && !hasResults && query && (
+          {!isLoading && !hasResults && query && !hasFunctionSuggestions && (
             <div className="px-4 py-6 text-center text-sm text-zinc-400">
               No results found for &quot;{query}&quot;
             </div>
           )}
 
+          {/* LAYA-ranked search actions — rendered by the
+              LayaSuggestions component. The component now shows ONLY
+              the top Laya pick (not all 4) and builds a contextual
+              label from the user's query + the queryType classifier
+              ("元朗" → "搜尋元朗嘅交通站點", "Bus" → "搵Bus嘅站").
+              Clicking pushes `/?q=<query>&filter=<chipKey>` so the
+              home page picks up the search and centers the map. The
+              onPick handler closes the dropdown + saves a recent
+              search before navigation. */}
+          <LayaSuggestions
+            appFunctionChoice={appFunctionChoice}
+            queryType={queryType}
+            layaLoading={layaLoading}
+            t={t}
+            query={query}
+            onPick={() => {
+              setIsOpen(false);
+              if (query.trim()) addRecentSearch(query.trim());
+            }}
+          />
+
+          {/* Recent searches — shown when input is focused but empty */}
           {!query && hasRecent && (
             <div>
               <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide flex items-center justify-between sticky top-0 bg-white border-b border-zinc-100">
@@ -416,6 +535,7 @@ export default function SearchBar({
             </div>
           )}
 
+          {/* Recommended Section */}
           {hasRecommended && (
             <div>
               <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5 sticky top-0 bg-blue-50 text-blue-600">
@@ -460,21 +580,26 @@ export default function SearchBar({
                         </div>
                       )}
                     </div>
-                    {item.barrierFree && (
-                      <div className="flex items-center gap-1 mb-1.5">
-                        <Accessibility className="w-3 h-3 text-blue-600" />
-                        <span className="text-xs font-semibold text-blue-600">無障礙</span>
-                      </div>
-                    )}
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      {item.barrierFree && (
+                        <div className="flex items-center gap-1">
+                          <Accessibility className="w-3 h-3 text-blue-600" />
+                          <span className="text-xs font-semibold text-blue-600">無障礙</span>
+                        </div>
+                      )}
+                    </div>
                   </button>
                 );
               })}
             </div>
           )}
 
+          {/* Search Results Section — already sorted by Laya appFunction
+              confidence desc, so the user's most-likely-intended category
+              sits at the top of the list. */}
           {hasResults && (
             <div>
-              {flatResults.slice(hasRecommended ? recommended.length : 0).map((item, idx) => {
+              {rankedResults.map((item, idx) => {
                 const type = item.poiType;
                 const config = TYPE_CONFIG[type];
                 if (!config) return null;
@@ -515,12 +640,14 @@ export default function SearchBar({
                         </div>
                       )}
                     </div>
-                    {item.barrierFree && (
-                      <div className="flex items-center gap-1 mb-1.5">
-                        <Accessibility className="w-3 h-3 text-blue-600" />
-                        <span className="text-xs font-semibold text-blue-600">無障礙</span>
-                      </div>
-                    )}
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      {item.barrierFree && (
+                        <div className="flex items-center gap-1">
+                          <Accessibility className="w-3 h-3 text-blue-600" />
+                          <span className="text-xs font-semibold text-blue-600">無障礙</span>
+                        </div>
+                      )}
+                    </div>
                   </button>
                 );
               })}

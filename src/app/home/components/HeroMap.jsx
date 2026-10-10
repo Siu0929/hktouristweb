@@ -1589,14 +1589,20 @@ export default function HeroMap({
         />
       )}
 
-      {/* Recent on my location button */}
+      {/* Recent on my location button — floats above the bottom box
+          (PlacesPanel / SpotPopup bottom sheet). When the panel is
+          collapsed to just the handle, the .places-panel-recenter-collapsed
+          modifier moves the button down to sit just above that
+          48px handle instead of leaving a 400px gap. */}
       {!!userLocation && !placesPanelDismissed && (
         <button
           type="button"
           onClick={handleRecenterOnUser}
           aria-label={t("mapRecenterAria")}
           title={t("mapRecenterAria")}
-          className="places-panel-recenter-float md:hidden"
+          className={`places-panel-recenter-float md:hidden${
+            placesPanelCollapsed ? " places-panel-recenter-collapsed" : ""
+          }`}
         >
           <Locate className="h-4 w-4" />
         </button>
