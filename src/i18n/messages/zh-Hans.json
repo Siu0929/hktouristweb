@@ -126,6 +126,10 @@
     "bottomSheetDismiss": "关闭",
     "bottomSheetExpand": "展开",
     "bottomSheetCollapse": "收起",
+    "bottomSheetSizeHandle": "拖动以调整大小",
+    "bottomSheetSizeClosed": "仅显示把手",
+    "bottomSheetSizeDefault": "半高",
+    "bottomSheetSizeExpanded": "全高",
     "bottomSheetShowClosest": "显示最近的地点",
     "bottomSheetShowNearby": "显示附近的地点",
     "bottomSheetShowFrequent": "显示常用地点",
@@ -159,6 +163,7 @@
     "bottomSheetStationShowRoute": "在地图上显示路线",
     "bottomSheetStationHideRoute": "隐藏路线",
     "bottomSheetStationEtaTitle": "即将到站",
+    "bottomSheetStationClose": "关闭",
     "mapRefreshing": "刷新中…",
     "mapHintPanToRefresh": "拖动地图以刷新"
   },

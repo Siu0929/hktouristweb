@@ -20,6 +20,11 @@ import {
   viewportToBounds,
   pathToBounds,
 } from "@/lib/routesApi";
+// `PANEL_HEIGHT_VALUES` exposes the same px height used by
+// `useBottomPanelDrag` (closed = 48px, default = 400px, expanded =
+// 800px). Importing it here lets the panel-shift effect below read
+// the current bottom-box height without duplicating the constants.
+import { PANEL_HEIGHT_VALUES } from "@/hooks/useBottomPanelDrag";
 import PlacesPanel from "@/components/PlacesPanel";
 import SpotPopup from "@/components/SpotPopup";
 
@@ -131,10 +136,13 @@ export default function HeroMap({
   destination,
   placesPanelTab,
   onPlacesPanelTabChange,
-  placesPanelDismissed,
-  onPlacesPanelDismiss,
-  placesPanelCollapsed,
-  onPlacesPanelCollapsedChange,
+  // 3-position height state for the two bottom sheets (PlacesPanel
+  // + SpotPopup). When this is `"closed"`, HeroMap unmounts both
+  // sheets so the bottom box disappears entirely; the home page
+  // shows the "Show Closest Places" button at the bottom in that
+  // case, matching the previous tap-to-dismiss UX.
+  bottomPanelHeight,
+  onBottomPanelHeightChange,
   onRemoveFrequentPlace,
   onClearFrequentPlaces,
   frequentPlaces,
@@ -165,6 +173,19 @@ export default function HeroMap({
   const tramStopFetchId = useRef(0);
   const programmaticMoveRef = useRef(false);
   const lastQueriedCentreRef = useRef(null);
+  // Tracks how much the camera has been nudged downward (in pixels)
+  // to compensate for the bottom box covering the lower portion of
+  // the map. `0` when the box is fully closed; equal to
+  // `PANEL_HEIGHT_VALUES[bottomPanelHeight] / 2` when the box is at
+  // either of the two visible heights. The effect further down (and
+  // the `handleMapLoad` block) apply the right amount on every
+  // transition; `applyPanelShift` re-applies the value after any
+  // `panTo` that resets the camera.
+  //
+  // Read via ref (not state) because every consumer of this value is
+  // either a one-shot effect or a long-lived map listener — neither
+  // needs to re-render when the value changes.
+  const panelShiftPxRef = useRef(0);
   // Mirror of `selected` so the marker effect (which intentionally
   // omits `selected` from its deps, see "Marker rendering" below)
   // can read the current selection via a ref without re-running the
@@ -314,6 +335,100 @@ export default function HeroMap({
   useEffect(() => {
     displayedSpotRef.current = displayedSpot ?? null;
   }, [displayedSpot]);
+
+  // Mirror `bottomPanelHeight` for the panel-shift helpers below,
+  // so they can read the current height without depending on the
+  // state directly (which would otherwise force them into React
+  // re-renders every time the user drags the bottom box handle).
+  const bottomPanelHeightRef = useRef(bottomPanelHeight);
+  useEffect(() => {
+    bottomPanelHeightRef.current = bottomPanelHeight;
+  }, [bottomPanelHeight]);
+
+  // The vertical camera nudge that compensates for the bottom box
+  // only makes sense on the mobile layout, where the PlacesPanel
+  // and SpotPopup actually sit at the bottom of the map. On
+  // desktop the same component becomes a right sidebar
+  // (`right: 96px; width: 420px;` in `globals.css`), so nudging
+  // the camera down would push the centre of the visible area
+  // further off the geographic centre instead of fixing it.
+  //
+  // Track the layout via a media-query listener so the
+  // bottom-panel-shift effect re-runs on resize and immediately
+  // adjusts (or removes) the in-flight shift. Without the
+  // listener, resizing from mobile to desktop while the panel is
+  // open would leave the camera nudged down on a layout where
+  // there is no bottom box to compensate for.
+  const [isMobileLayout, setIsMobileLayout] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const mq = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobileLayout(mq.matches);
+    update();
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", update);
+      return () => mq.removeEventListener("change", update);
+    }
+    // Safari < 14 only exposes the legacy `addListener` API.
+    mq.addListener(update);
+    return () => mq.removeListener(update);
+  }, []);
+
+  // Compute the camera-nudge (in pixels) the current panel height
+  // calls for on the current layout. Closed, or desktop, → `0`.
+  // Default (400 px) → 200. Expanded (800 px) → 400. The nudge
+  // is by design HALF the panel height so the centre of the
+  // *visible* (above-panel) area coincides with the underlying
+  // geographic centre after the camera moves down by `nudge`.
+  const targetPanelShiftPx = (heightKey, isMobile) => {
+    if (!isMobile) return 0;
+    if (heightKey === "closed") return 0;
+    return Math.round(PANEL_HEIGHT_VALUES[heightKey] / 2);
+  };
+
+  // Re-apply the panel-driven camera nudge to a map whose camera
+  // has just been reset (e.g. every `panTo` site below). Google
+  // Maps' `panTo` replaces the camera's geographic centre, which
+  // would otherwise wipe out the offset we applied when the
+  // bottom box opened. Calling `panBy` right after `panTo`
+  // preserves the same "visible area centred on the underlying
+  // map" framing the user has the whole time the box was open.
+  //
+  // Read from the ref instead of `bottomPanelHeight` so this
+  // helper can be invoked from event listeners and one-shot
+  // effects without forcing the surrounding callbacks to
+  // re-create on every drag.
+  const applyPanelShift = useCallback((map) => {
+    if (!map) return;
+    const shift = panelShiftPxRef.current;
+    if (shift === 0) return;
+    map.panBy(0, shift);
+  }, []);
+
+  // Dual-action callback the Frequent tab's bus-stop CTA and the
+  // closest-stations card both expect: tapping a stop (1) opens
+  // its popup sheet and (2) centres the map on the stop. Extracted
+  // out of the JSX so it can call `applyPanelShift` — otherwise
+  // the new bottom-box nudge would be wiped out the moment we
+  // `panTo` the marker, and the stop would land in the centre of
+  // the now-hidden half of the viewport.
+  const handleMapFocus = useCallback((spot) => {
+    if (!spot) return;
+    if (!Number.isFinite(spot.lat) || !Number.isFinite(spot.lng)) return;
+    setSelected(spot.id);
+    const map = mapRef.current;
+    if (!map) return;
+    programmaticMoveRef.current = true;
+    map.panTo({ lat: spot.lat, lng: spot.lng });
+    const currentZoom = map.getZoom?.();
+    if (typeof currentZoom === "number") {
+      map.setZoom(Math.min(Math.max(currentZoom, 15), 18));
+    }
+    // Re-apply the bottom-box nudge so the tapped stop lands in
+    // the centre of the *visible* (above-panel) area, not the
+    // geometric centre of the (partially hidden) whole viewport.
+    applyPanelShift(map);
+  }, [applyPanelShift]);
 
   const normalizedQuery = query.trim().toLowerCase();
   const normalizedDestination = destination.trim().toLowerCase();
@@ -477,6 +592,44 @@ export default function HeroMap({
         flushNearbyQueryFromMapRef.current?.();
       });
     }
+
+    // Apply the bottom-box camera nudge immediately on first map
+    // load so the camera opens at its already-compensated
+    // position. Without this, the map would render at its natural
+    // centre for one frame (the centre falls behind the bottom
+    // box when the panel is open) and then snap into place after
+    // the panel-shift effect below ran on the next render — a
+    // visible flicker on first paint.
+    //
+    // Gated on `panelShiftPxRef.current === 0` to avoid
+    // double-applying the nudge: the panel-shift effect fires
+    // eagerly on mount as soon as `isMobileLayout` settles (the
+    // media-query listener), and if the map loads *after* that
+    // effect has already pushed the shift, re-applying it here
+    // would compound by 200 px (default panel height) and leave
+    // the camera centred twice as far below the visible area's
+    // centre as intended.
+    //
+    // Reads the height from `bottomPanelHeightRef.current` rather
+    // than `bottomPanelHeight` so this `useCallback` doesn't
+    // re-create on every drag (which would tear down the
+    // listeners above). The mobile check uses `window.innerWidth`
+    // because the `isMobileLayout` listener effect hasn't run
+    // yet on the very first render — the `<=767px` boundary
+    // matches the Tailwind `md` breakpoint used by the rest of
+    // the page (see `.places-panel` in `globals.css`).
+    if (panelShiftPxRef.current === 0) {
+      const isMobileOnLoad =
+        typeof window !== "undefined" && window.innerWidth < 768;
+      const initialShift = targetPanelShiftPx(
+        bottomPanelHeightRef.current,
+        isMobileOnLoad
+      );
+      if (initialShift !== 0) {
+        map.panBy(0, initialShift);
+        panelShiftPxRef.current = initialShift;
+      }
+    }
   }, []);
 
   // Component-level unmount cleanup. We do NOT touch the polyline
@@ -627,7 +780,7 @@ export default function HeroMap({
           // animation frame; the two motions merge into one.
           const naturalZoom = map.getZoom();
           if (typeof naturalZoom === "number") {
-            map.setZoom(Math.max(naturalZoom - 1, 1));
+            map.setZoom(Math.max(naturalZoom - 2, 1));
           }
         }
         setRouteStationKey(key);
@@ -947,13 +1100,20 @@ export default function HeroMap({
     programmaticMoveRef.current = true;
     map.panTo({ lat: userLocation.lat, lng: userLocation.lon });
     map.setZoom(DEFAULT_ZOOM);
+    // `panTo` resets the camera's geographic centre, which would
+    // wipe out the bottom-box camera nudge we applied on the
+    // panel-height transition. Re-apply the same nudge so the
+    // user continues to see themselves in the centre of the
+    // visible (above-panel) area, not in the centre of the
+    // (now partially hidden) whole viewport.
+    applyPanelShift(map);
     lastQueriedCentreRef.current = {
       lat: userLocation.lat,
       lon: userLocation.lon,
       zoom: DEFAULT_ZOOM,
     };
     setNearbyQuery(null);
-  }, [userLocation]);
+  }, [userLocation, applyPanelShift]);
 
   // Cluster chip click handler.
   //
@@ -981,12 +1141,18 @@ export default function HeroMap({
     programmaticMoveRef.current = true;
     map.panTo({ lat, lng });
     map.setZoom(DEFAULT_ZOOM);
+    // Re-apply the bottom-box nudge after the pan (same reason as
+    // `handleRecenterOnUser` above: `panTo` resets the camera and
+    // would otherwise wipe out our offset, leaving the cluster
+    // centred at the geometric middle of the whole viewport
+    // instead of the visible above-panel area).
+    applyPanelShift(map);
     lastQueriedCentreRef.current = {
       lat,
       lon: lng,
       zoom: DEFAULT_ZOOM,
     };
-  }, []);
+  }, [applyPanelShift]);
 
   // (Removed) Auto-pan to first match on every query change.
   //
@@ -1002,10 +1168,13 @@ export default function HeroMap({
   // map (they're added to `searchResultSpots` and rendered as
   // markers), so the user can still tap any of them to navigate.
 
-  // Clear any in-app route when the bottom sheet is dismissed, so
-  // the polyline does not linger after the user closes the panel.
+  // Clear any in-app route when the bottom box is fully hidden
+  // (closed), so the polyline does not linger after the user
+  // collapses the panel all the way down. The previous version
+  // watched `placesPanelDismissed`; that flag is gone now, so we
+  // react to the new "closed" position instead — same outcome.
   useEffect(() => {
-    if (!placesPanelDismissed) return;
+    if (bottomPanelHeight !== "closed") return;
     if (routeAbortRef.current) {
       routeAbortRef.current.abort();
       routeAbortRef.current = null;
@@ -1016,7 +1185,70 @@ export default function HeroMap({
     }
     setRouteStationKey(null);
     setRouteInfo(null);
-  }, [placesPanelDismissed]);
+  }, [bottomPanelHeight]);
+
+  // Nudge the camera so the *visible* (above-panel) area stays
+  // centred on the same geographic point as the *full* map when
+  // the bottom box is open. Without this, opening the panel
+  // leaves the map's geographic centre pinned at the middle of
+  // the whole viewport — including the area the panel now
+  // covers — so every nearby spot appears biased toward the
+  // bottom of what's still visible. Nudging the camera DOWN by
+  // half the panel height (a positive y `panBy`) translates the
+  // visible area up by the same amount on screen, so the centre
+  // of "what the user can see" coincides with the centre of the
+  // underlying map.
+  //
+  // Idempotent across height transitions: the effect pans by the
+  // DELTA between the previous shift and the new shift, so a
+  // step from "default" to "expanded" only nudges by 200 px (half
+  // the height difference), never the full 400 px again. That
+  // matches what the user intuitively wants — opening the
+  // handle further should add a small additional nudge, not
+  // re-stack the whole offset.
+  //
+  // Gated on `isMobileLayout`: on desktop the PlacesPanel is a
+  // right sidebar, so a vertical nudge would only push content
+  // further off-centre. Resizing past the 768 px breakpoint
+  // resets the shift to zero (desktop target is 0, so the
+  // `delta` becomes negative and the camera pans back up).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const target = targetPanelShiftPx(bottomPanelHeight, isMobileLayout);
+    const current = panelShiftPxRef.current;
+    const delta = target - current;
+    if (delta === 0) return;
+    // Mark the move as programmatic so the `idle` listener
+    // skips the nearby-refresh — we only relocated the viewport,
+    // the underlying centre and zoom did not change, so a
+    // /api/<transport>/nearby refresh would just repeat the
+    // last query's payload.
+    programmaticMoveRef.current = true;
+    map.panBy(0, delta);
+    panelShiftPxRef.current = target;
+  }, [bottomPanelHeight, isMobileLayout]);
+
+  // Re-apply the panel shift whenever `userLocation` updates.
+  // The `<GoogleMap>` component watches its `center` prop and
+  // calls `map.setCenter(...)` internally on every change — and
+  // because `mapCenter` is derived from `userLocation`, every
+  // GPS fix (the geolocation watcher fires continuously) causes
+  // an internal `setCenter` that wipes out the `panBy` offset
+  // we previously applied. Without this effect the user would
+  // see the camera snap back to the geometric centre
+  // (sitting behind the bottom box) every few seconds while the
+  // panel is open. Setting `programmaticMoveRef` first also
+  // makes the `idle` event the `setCenter` triggers skip the
+  // redundant nearby-refresh.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const shift = panelShiftPxRef.current;
+    if (shift === 0) return;
+    programmaticMoveRef.current = true;
+    map.panBy(0, shift);
+  }, [userLocation]);
 
   // Center on user first time
   //
@@ -1036,7 +1268,15 @@ export default function HeroMap({
     programmaticMoveRef.current = true;
     mapRef.current.panTo({ lat: userLocation.lat, lng: userLocation.lon });
     mapRef.current.setZoom(18);
-  }, [userLocation, isMapReady]);
+    // Same as `handleRecenterOnUser` above: re-apply the
+    // bottom-box nudge so the user's dot lands in the visible
+    // (above-panel) centre rather than in the centre of the
+    // hidden half of the viewport. We may already have a non-zero
+    // nudge from the panel-height transition or from the
+    // `handleMapLoad` initialisation — calling `applyPanelShift`
+    // here simply re-applies whatever the current ref says.
+    applyPanelShift(mapRef.current);
+  }, [userLocation, isMapReady, applyPanelShift]);
 
   // User location marker
   useEffect(() => {
@@ -1191,6 +1431,14 @@ export default function HeroMap({
         if (mapRef.current) {
           programmaticMoveRef.current = true;
           mapRef.current.panTo({ lat: spot.lat, lng: spot.lng });
+          // Re-apply the bottom-box nudge so the tapped marker
+          // sits in the centre of the *visible* (above-panel)
+          // area rather than the geometric centre of the whole
+          // viewport (which is now hidden behind the panel).
+          // `panTo` resets the camera, so without this call the
+          // marker would appear biased toward the bottom of the
+          // visible area.
+          applyPanelShift(mapRef.current);
         }
         if (typeof onPinPlace === "function") {
           onPinPlace(spot);
@@ -1515,52 +1763,36 @@ export default function HeroMap({
         </div>
       )}
 
-      {/* PlacesPanel */}
-      <PlacesPanel
-        t={t}
-        closestStations={closestStations}
-        loading={nearbyLoading}
-        selectedId={selected}
-        onSelect={(spot) => setSelected(spot.id)}
-        onMapFocus={(spot) => {
-          if (!spot) return;
-          if (!Number.isFinite(spot.lat) || !Number.isFinite(spot.lng)) return;
-          // Dual action the Frequent tab's bus-stop CTA expects:
-          //   1. Set the spot as the active selection so the
-          //      SpotPopup bottom sheet is rendered on top of the
-          //      PlacesPanel (the original bottom tab box).
-          //   2. Pan the map so the stop sits in the middle of the
-          //      viewport (without triggering a nearby refresh).
-          // We also raise the zoom a notch over the current level
-          // (clamped at 18) so the marker is clearly readable after
-          // the pan — the previous behaviour on the Closest tab was
-          // to keep the existing zoom, which works for that tab
-          // because the user is already centred on their location.
-          setSelected(spot.id);
-          if (mapRef.current) {
-            const map = mapRef.current;
-            programmaticMoveRef.current = true;
-            map.panTo({ lat: spot.lat, lng: spot.lng });
-            const currentZoom = map.getZoom?.();
-            if (typeof currentZoom === "number") {
-              map.setZoom(Math.min(Math.max(currentZoom, 15), 18));
-            }
-          }
-        }}
-        onShowRoute={handleShowRoute}
-        activeRouteStationKey={routeStationKey}
-        routeInfo={routeInfo}
-        nearbyToilets={nearbyToilets}
-        frequentPlaces={frequentPlaces}
-        onRemoveFrequent={onRemoveFrequentPlace}
-        onClearFrequent={onClearFrequentPlaces}
-        dismissed={placesPanelDismissed}
-        onDismiss={onPlacesPanelDismiss}
-        tab={placesPanelTab}
-        onTabChange={onPlacesPanelTabChange}
-        isCollapsed={placesPanelCollapsed}
-        onToggleCollapse={onPlacesPanelCollapsedChange}
-      />
+      {/* PlacesPanel — hidden when the user has collapsed the bottom
+          box all the way to its smallest position
+          (`bottomPanelHeight === "closed"`). In that state the home
+          page shows the "Show Closest Places" button at the bottom
+          instead, matching the previous tap-to-dismiss UX. */}
+      {bottomPanelHeight !== "closed" && (
+        <PlacesPanel
+          t={t}
+          closestStations={closestStations}
+          loading={nearbyLoading}
+          selectedId={selected}
+          onSelect={(spot) => setSelected(spot.id)}
+          onMapFocus={handleMapFocus}
+          onShowRoute={handleShowRoute}
+          activeRouteStationKey={routeStationKey}
+          routeInfo={routeInfo}
+          nearbyToilets={nearbyToilets}
+          frequentPlaces={frequentPlaces}
+          onRemoveFrequent={onRemoveFrequentPlace}
+          onClearFrequent={onClearFrequentPlaces}
+          tab={placesPanelTab}
+          onTabChange={onPlacesPanelTabChange}
+          // 3-position height state shared between the two bottom sheets.
+          // Both the PlacesPanel AND the SpotPopup drag handle read this
+          // value so dragging either one keeps the pair in lockstep.
+          // See `useBottomPanelDrag` for the snap-to-nearest logic.
+          height={bottomPanelHeight}
+          onHeightChange={onBottomPanelHeightChange}
+        />
+      )}
 
       {/* SpotPopup as a bottom box on top of PlacesPanel — matches
           the Google Maps app structure where tapping a marker
@@ -1574,8 +1806,15 @@ export default function HeroMap({
           Rendered AFTER PlacesPanel so it sits on top in the
           stacking order. The CSS class uses a higher z-index
           (.spot-popup-bottom-sheet = z-40 vs .places-panel = z-30)
-          for the same reason. */}
-      {displayedSpot && (
+          for the same reason.
+
+          Shares the same `bottomPanelHeight` state as the
+          PlacesPanel above, so dragging the handle on either
+          sheet resizes both. Gated on `bottomPanelHeight !==
+          "closed"` so a fully-collapsed box hides both sheets in
+          one go — the user re-opens via the "Show Closest Places"
+          button at the bottom of the screen. */}
+      {displayedSpot && bottomPanelHeight !== "closed" && (
         <SpotPopup
           spot={displayedSpot}
           onClose={dismissSelectedSpot}
@@ -1591,22 +1830,29 @@ export default function HeroMap({
           // owner of the active polyline.
           routeInfo={routeInfo}
           userLocation={userLocation}
+          height={bottomPanelHeight}
+          onHeightChange={onBottomPanelHeightChange}
         />
       )}
 
       {/* Recent on my location button — floats above the bottom box
           (PlacesPanel / SpotPopup bottom sheet). When the panel is
-          collapsed to just the handle, the .places-panel-recenter-collapsed
-          modifier moves the button down to sit just above that
-          48px handle instead of leaving a 400px gap. */}
-      {!!userLocation && !placesPanelDismissed && (
+          expanded to 800px, the .places-panel-recenter-expanded
+          modifier pushes the button above the taller sheet.
+          Hidden entirely when `bottomPanelHeight === "closed"`
+          because the bottom box is not on screen in that state
+          (the home page shows the "Show Closest Places" button at
+          the bottom instead). */}
+      {!!userLocation && bottomPanelHeight !== "closed" && (
         <button
           type="button"
           onClick={handleRecenterOnUser}
           aria-label={t("mapRecenterAria")}
           title={t("mapRecenterAria")}
           className={`places-panel-recenter-float md:hidden${
-            placesPanelCollapsed ? " places-panel-recenter-collapsed" : ""
+            bottomPanelHeight === "expanded"
+              ? " places-panel-recenter-expanded"
+              : ""
           }`}
         >
           <Locate className="h-4 w-4" />

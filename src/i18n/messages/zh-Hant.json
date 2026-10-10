@@ -126,6 +126,10 @@
     "bottomSheetDismiss": "關閉",
     "bottomSheetExpand": "展開",
     "bottomSheetCollapse": "收起",
+    "bottomSheetSizeHandle": "拖曳以調整大小",
+    "bottomSheetSizeClosed": "僅顯示把手",
+    "bottomSheetSizeDefault": "半高",
+    "bottomSheetSizeExpanded": "全高",
     "bottomSheetShowClosest": "顯示最近的地點",
     "bottomSheetShowNearby": "顯示附近的地點",
     "bottomSheetShowFrequent": "顯示常用地點",
@@ -159,6 +163,7 @@
     "bottomSheetStationShowRoute": "在地圖上顯示路線",
     "bottomSheetStationHideRoute": "隱藏路線",
     "bottomSheetStationEtaTitle": "即將到站",
+    "bottomSheetStationClose": "關閉",
     "mapRefreshing": "重新整理中…",
     "mapHintPanToRefresh": "拖動地圖以重新整理"
   },

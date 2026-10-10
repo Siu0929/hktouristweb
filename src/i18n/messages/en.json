@@ -127,6 +127,10 @@
     "bottomSheetDismiss": "Close",
     "bottomSheetExpand": "Expand",
     "bottomSheetCollapse": "Collapse",
+    "bottomSheetSizeHandle": "Drag to resize",
+    "bottomSheetSizeClosed": "Handle only",
+    "bottomSheetSizeDefault": "Half height",
+    "bottomSheetSizeExpanded": "Full height",
     "bottomSheetShowClosest": "Show Closest Places",
     "bottomSheetShowNearby": "Show Nearby Places",
     "bottomSheetShowFrequent": "Show Frequent Places",
@@ -158,7 +162,8 @@
     "bottomSheetStationNavigate": "Navigate to station",
     "bottomSheetStationShowRoute": "Show route on map",
     "bottomSheetStationHideRoute": "Hide route",
-    "bottomSheetStationEtaTitle": "Next arrivals"
+    "bottomSheetStationEtaTitle": "Next arrivals",
+    "bottomSheetStationClose": "Close"
   },
   "busStops": {
     "title": "Nearby Bus Stops",

@@ -91,10 +91,24 @@ function HomePage() {
   const [nearbyToilets, setNearbyToilets] = useState([]);
   const [nearbyLoading, setNearbyLoading] = useState(false);
 
-  // Places panel state
+  // Places panel state. `bottomPanelHeight` is the new 3-position
+  // enum that controls how tall the bottom sheet sits on mobile:
+  //   - "closed"   → bottom box is fully hidden (handle bar, recenter
+  //                   button, and tab content all gone). The "Show
+  //                   Closest Places" button at the bottom of the
+  //                   screen is the only thing left, matching the
+  //                   previous tap-to-dismiss UX. Dragging the gray
+  //                   handle to the bottom (or tapping it once the
+  //                   sheet is visible) lands here.
+  //   - "default"  → 400 px  (current production height)
+  //   - "expanded" → 800 px  (twice the default)
+  // The PlacesPanel AND the SpotPopup both read this same value so
+  // dragging the handle on either sheet keeps the two in lockstep.
+  // HeroMap gates the actual rendering on `bottomPanelHeight !==
+  // "closed"`, so a single piece of state controls whether the pair
+  // is visible — no separate `dismissed` boolean needed.
   const [placesPanelTab, setPlacesPanelTab] = useState("closest");
-  const [placesPanelDismissed, setPlacesPanelDismissed] = useState(false);
-  const [placesPanelCollapsed, setPlacesPanelCollapsed] = useState(false);
+  const [bottomPanelHeight, setBottomPanelHeight] = useState("default");
 
   // AI Planner state
   const [aiPlannerOpen, setAiPlannerOpen] = useState(false);
@@ -161,10 +175,14 @@ function HomePage() {
     setDestination(value);
   }, []);
 
-  // Places panel tab click
+  // Places panel tab click. Switching tab from the icon rail also
+  // surfaces the bottom box if the user previously collapsed it
+  // to "closed". Previously this was `setPlacesPanelDismissed(false)`;
+  // we now just snap to the default height so the icon rail can
+  // re-open the panel from the closed state.
   const handlePlacesPanelTabClick = useCallback((tab) => {
     setPlacesPanelTab(tab);
-    setPlacesPanelDismissed(false);
+    setBottomPanelHeight("default");
   }, []);
 
   // =============================================================================
@@ -246,10 +264,8 @@ function HomePage() {
             destination={destination}
             placesPanelTab={placesPanelTab}
             onPlacesPanelTabChange={setPlacesPanelTab}
-            placesPanelDismissed={placesPanelDismissed}
-            onPlacesPanelDismiss={() => setPlacesPanelDismissed(true)}
-            placesPanelCollapsed={placesPanelCollapsed}
-            onPlacesPanelCollapsedChange={setPlacesPanelCollapsed}
+            bottomPanelHeight={bottomPanelHeight}
+            onBottomPanelHeightChange={setBottomPanelHeight}
             onRemoveFrequentPlace={handleRemoveFrequentPlace}
             onClearFrequentPlaces={handleClearFrequentPlaces}
             frequentPlaces={frequentPlaces}
@@ -259,7 +275,12 @@ function HomePage() {
         {/* Search bar + filter overlay */}
         <div
           className={`pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center px-5 pt-8 transition-all duration-300 md:pr-24 md:pt-10 ${
-            !placesPanelDismissed ? "md:pr-129" : ""
+            // Add the extra right padding for desktop only when the
+            // right-sidebar is visible (i.e. when the bottom box is
+            // not fully closed). When the panel is closed the
+            // sidebar is unmounted, so we can keep the original
+            // desktop padding instead.
+            bottomPanelHeight !== "closed" ? "md:pr-129" : ""
           }`}
         >
           <div className="pointer-events-auto w-full max-w-240">
@@ -424,11 +445,16 @@ function HomePage() {
           </div>
         </div>
 
-        {/* Mobile collapsed-state handle */}
-        {placesPanelDismissed && (
+        {/* Mobile "Show Bottom Box" button. Appears when the bottom
+            box is fully collapsed to "closed" — matches the
+            previous behaviour where tapping the dismiss handle hid
+            the panel and revealed this same button. Tapping it
+            snaps the bottom box back to "default" height so the
+            user lands on the same height they had before. */}
+        {bottomPanelHeight === "closed" && (
           <button
             type="button"
-            onClick={() => setPlacesPanelDismissed(false)}
+            onClick={() => setBottomPanelHeight("default")}
             aria-label={t("bottomSheetShow")}
             title={t("bottomSheetShow")}
             className="md:hidden pointer-events-auto absolute inset-x-0 bottom-3 z-20 mx-auto flex w-fit max-w-[calc(100%-2rem)] items-center gap-2 rounded-full border border-[#e5e7eb] bg-white/95 px-4 py-2 text-[13px] font-semibold text-[#1f2937] shadow-[0_4px_14px_rgba(0,0,0,0.18)] backdrop-blur transition-all hover:bg-white active:scale-95"
@@ -452,7 +478,12 @@ function HomePage() {
               onClick={() => handlePlacesPanelTabClick("frequent")}
               title={t("frequentTitle")}
               className={`mb-4 flex flex-col items-center gap-1 rounded-xl p-3 transition-all ${
-                placesPanelTab === "frequent" && !placesPanelDismissed
+                // Highlight the active tab only when the bottom
+                // box is visible — when it's fully collapsed the
+                // icon rail still tracks the last-selected tab
+                // internally but there's nothing on-screen for the
+                // user to look at.
+                placesPanelTab === "frequent" && bottomPanelHeight !== "closed"
                   ? "bg-[#1E40AF] text-white shadow-[0_2px_6px_rgba(30,64,175,0.3)]"
                   : "text-[#6b7280] hover:bg-[#f3f4f6] hover:text-[#1E40AF]"
               }`}
@@ -469,7 +500,7 @@ function HomePage() {
               onClick={() => handlePlacesPanelTabClick("nearby")}
               title={t("nearbyTitle")}
               className={`mb-4 flex flex-col items-center gap-1 rounded-xl p-3 transition-all ${
-                placesPanelTab === "nearby" && !placesPanelDismissed
+                placesPanelTab === "nearby" && bottomPanelHeight !== "closed"
                   ? "bg-[#1E40AF] text-white shadow-[0_2px_6px_rgba(30,64,175,0.3)]"
                   : "text-[#6b7280] hover:bg-[#f3f4f6] hover:text-[#1E40AF]"
               }`}
@@ -486,7 +517,7 @@ function HomePage() {
               onClick={() => handlePlacesPanelTabClick("closest")}
               title={t("bottomSheetStationTitle")}
               className={`flex flex-col items-center gap-1 rounded-xl p-3 transition-all ${
-                placesPanelTab === "closest" && !placesPanelDismissed
+                placesPanelTab === "closest" && bottomPanelHeight !== "closed"
                   ? "bg-[#1E40AF] text-white shadow-[0_2px_6px_rgba(30,64,175,0.3)]"
                   : "text-[#6b7280] hover:bg-[#f3f4f6] hover:text-[#1E40AF]"
               }`}

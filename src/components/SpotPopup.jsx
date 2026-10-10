@@ -1,19 +1,7 @@
 "use client";
 
-import {
-  Toilet,
-  MapPin,
-  Bus,
-  Train,
-  TramFront,
-  Ship,
-  Bookmark,
-  Loader2,
-  Navigation,
-  X,
-  Footprints,
-} from "lucide-react";
-import { useState, useCallback, useEffect } from "react";
+import { Toilet, MapPin, Bus, Train, TramFront, Ship, Bookmark, Loader2, Navigation, X, Footprints } from "lucide-react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   addFrequentPlace,
   removeFrequentPlace,
@@ -26,6 +14,9 @@ import {
   routeDistanceLabel,
 } from "@/lib/routesApi";
 import { distanceMetres } from "@/app/home/constants";
+import {
+  useBottomPanelDrag,
+} from "@/hooks/useBottomPanelDrag";
 
 // Walking routes are only useful up to a sensible on-foot radius:
 // beyond this, the user almost certainly wants a transit option
@@ -522,30 +513,34 @@ function SpotPopupContent({
         background: "white",
         borderRadius: "12px",
         boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
-        padding: "16px",
+        padding: "20px 20px 16px",
         minWidth: "240px",
         maxWidth: "320px",
         fontFamily: "inherit",
       }}
     >
+      {/* Top row — spot icon + name on the left, close button
+          anchored to the top-right corner of the bottom box. The
+          close button uses an absolutely-positioned container so it
+          always sits flush against the top-right edge regardless of
+          how tall the name + route button row below grows. The
+          previous inline layout stacked the close button NEXT to
+          the route button inside the same flex row, which meant a
+          long spot name would push the close button off-card and
+          make it impossible to dismiss the popup without scrolling. */}
       <div
         style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          gap: "8px",
-          marginBottom: "12px",
-          // Keep the header at its natural height; let the EtasPanel
-          // below claim the remaining vertical space with `flex: 1`.
+          position: "relative",
+          marginBottom: "16px",
           flexShrink: 0,
         }}
       >
-        <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0, paddingRight: "52px" }}>
           <div
             style={{
-              width: "36px",
-              height: "36px",
-              borderRadius: "10px",
+              width: "44px",
+              height: "44px",
+              borderRadius: "12px",
               backgroundColor: spotColor + "20",
               display: "flex",
               alignItems: "center",
@@ -553,15 +548,27 @@ function SpotPopupContent({
               flexShrink: 0,
             }}
           >
-            <Icon size={18} color={spotColor} />
+            <Icon size={22} color={spotColor} />
           </div>
-          <div>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <div
               style={{
-                fontSize: "14px",
-                fontWeight: 600,
+                fontSize: "18px",
+                fontWeight: 700,
                 color: "#111827",
                 lineHeight: 1.3,
+                // Allow the station name to wrap onto a second line
+                // when the right cluster (walking-route pill + "Show
+                // route" button + close button) claims more of the
+                // row than a single-line name can fit alongside.
+                // Without `overflowWrap: "anywhere"` a long Chinese
+                // terminus like "林錦公路" would push the title out
+                // of the card or compress the icon, neither of which
+                // is what we want. The right cluster has
+                // `flex-shrink: 0`, so the title is always the
+                // element that yields.
+                overflowWrap: "anywhere",
+                wordBreak: "break-word",
               }}
             >
               {spot.name}
@@ -569,129 +576,167 @@ function SpotPopupContent({
           </div>
         </div>
 
-        {/* Right-aligned cluster: time / distance pill (only when a
-            route is active for this spot) sits IMMEDIATELY to the
-            left of the navigate button, both inside the same flex
-            row so they share a baseline. Wrapping the two in their
-            own group keeps the long station name on the left
-            constrained by `flex: 1` and the cluster flush right via
-            `flex-shrink: 0`, so a wide station name can wrap onto a
-            second line without pushing the controls off-card. */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            flexShrink: 0,
-          }}
-        >
-          {canShowRoute &&
-            isRouteActive &&
-            routeInfo &&
-            routeInfo.key === routeKey && (() => {
-              // Time / distance readout for the currently-drawn
-              // walking route. The ONLY place on the screen where
-              // the route's time / distance now surface — the
-              // closest-station tab in PlacesPanel intentionally
-              // stopped rendering the same pill, so tapping a
-              // station card's navigate button (which opens this
-              // sheet AND draws the route) is the way the user gets
-              // the walking ETA. We guard on `isRouteActive` so the
-              // badge only appears when the active polyline belongs
-              // to THIS spot (not when the user happens to have a
-              // route drawn for some other stop while reading this
-              // popup).
-              const walkingMinutes = routeDurationMinutes(
-                routeInfo.duration
-              );
-              if (walkingMinutes == null) return null;
-              const distance = routeDistanceLabel(
-                routeInfo.distanceMeters
-              );
-              const minLabel = `${walkingMinutes} ${t(
-                "bottomSheetStationMin"
-              )}`;
-              return (
-                <span
-                  // Rounded mint pill, matching the visual the
-                  // closest-station card used to render so users
-                  // moving between the two surfaces read the same
-                  // data the same way. The icon has been swapped
-                  // from an emoji to a lucide `Footprints` glyph so
-                  // the pill no longer depends on system emoji
-                  // rendering (which varied between iOS / Android /
-                  // desktop web).
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    padding: "4px 8px",
-                    borderRadius: 999,
-                    background: "#ecfdf5",
-                    color: "#047857",
-                    fontSize: 12,
-                    fontWeight: 600,
-                    lineHeight: 1.2,
-                    whiteSpace: "nowrap",
-                    flexShrink: 0,
-                  }}
-                  title={distance ? `${minLabel} · ${distance}` : minLabel}
-                  aria-label={
-                    distance ? `${minLabel} · ${distance}` : minLabel
-                  }
-                >
-                  <Footprints size={12} strokeWidth={2.25} />
-                  <span>
-                    {minLabel}
-                    {distance ? (
-                      <>
-                        <span aria-hidden="true"> · </span>
-                        {distance}
-                      </>
-                    ) : null}
-                  </span>
+        {/* Top-right close button — anchored to the top-right of
+            the header row so it stays reachable even when the
+            spot name is long enough to wrap to a second line. The
+            container is absolutely positioned at -8px / -8px so
+            the button slightly overflows the row's padding for a
+            "floating" feel that matches the in-image reference. */}
+        {typeof onClose === "function" && (
+          <button
+            type="button"
+            className="spot-popup-bottom-sheet-close"
+            aria-label={t("bottomSheetStationClose")}
+            title={t("bottomSheetStationClose")}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+            style={{
+              position: "absolute",
+              top: "-6px",
+              right: "-6px",
+            }}
+          >
+            <X className="h-5 w-5" />
+          </button>
+        )}
+      </div>
+
+      {/* Route / navigate cluster — sits in its own row below the
+          header so it can stretch the full width of the card and
+          display the localized "Show route" / "Hide route" label
+          alongside the icon. Previously this control shared a row
+          with the spot name and the close button, which made a
+          wide Chinese label like "在地圖上顯示路線" wrap or get
+          truncated. The row below the header has the room to
+          render the pill at its natural width without crowding
+          either neighbour. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: "12px",
+          flexShrink: 0,
+        }}
+      >
+        {canShowRoute &&
+          isRouteActive &&
+          routeInfo &&
+          routeInfo.key === routeKey && (() => {
+            // Time / distance readout for the currently-drawn
+            // walking route. The ONLY place on the screen where
+            // the route's time / distance now surface — the
+            // closest-station tab in PlacesPanel intentionally
+            // stopped rendering the same pill, so tapping a
+            // station card's navigate button (which opens this
+            // sheet AND draws the route) is the way the user gets
+            // the walking ETA. We guard on `isRouteActive` so the
+            // badge only appears when the active polyline belongs
+            // to THIS spot (not when the user happens to have a
+            // route drawn for some other stop while reading this
+            // popup).
+            const walkingMinutes = routeDurationMinutes(
+              routeInfo.duration
+            );
+            if (walkingMinutes == null) return null;
+            const distance = routeDistanceLabel(
+              routeInfo.distanceMeters
+            );
+            const minLabel = `${walkingMinutes} ${t(
+              "bottomSheetStationMin"
+            )}`;
+            return (
+              <span
+                // Rounded mint pill, matching the visual the
+                // closest-station card used to render so users
+                // moving between the two surfaces read the same
+                // data the same way. The icon has been swapped
+                // from an emoji to a lucide `Footprints` glyph so
+                // the pill no longer depends on system emoji
+                // rendering (which varied between iOS / Android /
+                // desktop web).
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "4px 8px",
+                  borderRadius: 999,
+                  background: "#ecfdf5",
+                  color: "#047857",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  lineHeight: 1.2,
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
+                }}
+                title={distance ? `${minLabel} · ${distance}` : minLabel}
+                aria-label={
+                  distance ? `${minLabel} · ${distance}` : minLabel
+                }
+              >
+                <Footprints size={12} strokeWidth={2.25} />
+                <span>
+                  {minLabel}
+                  {distance ? (
+                    <>
+                      <span aria-hidden="true"> · </span>
+                      {distance}
+                    </>
+                  ) : null}
                 </span>
-              );
-            })()}
-          {canShowRoute && (
-            <button
-              type="button"
-              // Reuse the PlacesPanel route button's class so the two
-              // affordances read identically across the bottom sheet
-              // card and the per-stop popup. The "active" variant flips
-              // the fill to red and shows an X icon, signalling that a
-              // second tap will dismiss the polyline currently drawn
-              // on the map.
-              className={`places-panel-station-navigate${
-                isRouteActive ? " places-panel-station-navigate-active" : ""
-              }`}
-              aria-label={
-                isRouteActive
-                  ? t("bottomSheetStationHideRoute")
-                  : t("bottomSheetStationShowRoute")
-              }
-              aria-pressed={isRouteActive}
-              title={
-                isRouteActive
-                  ? t("bottomSheetStationHideRoute")
-                  : t("bottomSheetStationShowRoute")
-              }
-              onClick={(e) => {
-                // Stop the click before it reaches the map's marker
-                // listeners — otherwise tapping the button can also
-                // count as a click on the underlying marker dot.
-                e.stopPropagation();
-                onShowRoute(spot);
-              }}
-            >
-              {isRouteActive ? (
-                <X className="h-3.5 w-3.5" />
-              ) : (
-                <Navigation className="h-3.5 w-3.5" />
-              )}
-            </button>
-          )}
-        </div>
+              </span>
+            );
+          })()}
+        {canShowRoute && (
+          <button
+            type="button"
+            // Reuse the PlacesPanel route button's class so the two
+            // affordances read identically across the bottom sheet
+            // card and the per-stop popup. The "active" variant flips
+            // the fill to red and shows an X icon, signalling that a
+            // second tap will dismiss the polyline currently drawn
+            // on the map. The `places-panel-station-navigate-with-text`
+            // modifier pairs with the base class to render the
+            // localized "Show route" / "Hide route" label next to the
+            // icon — without it the button would collapse to the icon
+            // only on narrow viewports and the affordance would be
+            // lost.
+            className={`places-panel-station-navigate places-panel-station-navigate-with-text${
+              isRouteActive ? " places-panel-station-navigate-active" : ""
+            }`}
+            aria-label={
+              isRouteActive
+                ? t("bottomSheetStationHideRoute")
+                : t("bottomSheetStationShowRoute")
+            }
+            aria-pressed={isRouteActive}
+            title={
+              isRouteActive
+                ? t("bottomSheetStationHideRoute")
+                : t("bottomSheetStationShowRoute")
+            }
+            onClick={(e) => {
+              // Stop the click before it reaches the map's marker
+              // listeners — otherwise tapping the button can also
+              // count as a click on the underlying marker dot.
+              e.stopPropagation();
+              onShowRoute(spot);
+            }}
+          >
+            {isRouteActive ? (
+              <X className="h-4 w-4" />
+            ) : (
+              <Navigation className="h-4 w-4" />
+            )}
+            <span className="places-panel-station-navigate-label">
+              {isRouteActive
+                ? t("bottomSheetStationHideRoute")
+                : t("bottomSheetStationShowRoute")}
+            </span>
+          </button>
+        )}
       </div>
 
       {(isBusStop || isFerryPier || isMtrStation || isLightRailStop || isTramStop) && etaConfig && (
@@ -720,6 +765,13 @@ export default function SpotPopup({
   // so the time / distance readout can render under the header
   // when THIS spot owns the active route.
   routeInfo = null,
+  // 3-position height state for the mobile bottom sheet. Reads the
+  // same enum ('closed' | 'default' | 'expanded') as the PlacesPanel
+  // so dragging either handle keeps both sheets in lockstep.
+  // Desktop layout (>= md) ignores this and uses the normal 400 px
+  // bottom-aligned card.
+  height = "default",
+  onHeightChange,
 }) {
   // The popup used to live inside the Google Map's overlay layer
   // (`OverlayView`), anchored to the marker's lat/lng so it floated
@@ -733,18 +785,57 @@ export default function SpotPopup({
   // on the sheet never reach the map container in the first place.
   if (!spot) return null;
 
+  // Ref to the sheet's outer DOM node. The drag hook writes the
+  // live drag height to `sheet.style.height` so the pointer moves
+  // are reflected on-screen without a React render in the middle
+  // of the gesture.
+  const sheetRef = useRef(null);
+
+  // Drag handlers for the gray handle at the top of the mobile
+  // sheet. Reads the current `height` as the starting position;
+  // calls `onHeightChange` with the snapped key on release. A pure
+  // tap (no drag past the threshold) is forwarded to `onClose` so
+  // tapping the handle still closes the popup — matches the
+  // existing behaviour. `isDragging` switches the handle to a
+  // `grabbing` cursor mid-gesture (see
+  // `.spot-popup-bottom-sheet-handle[data-dragging="true"]`).
+  const {
+    onPointerDown: onHandlePointerDown,
+    onPointerMove: onHandlePointerMove,
+    onPointerUp: onHandlePointerUp,
+    onPointerCancel: onHandlePointerCancel,
+    isDragging: isHandleDragging,
+  } = useBottomPanelDrag({
+    height,
+    onHeightChange,
+    onClick: onClose,
+    sheetRef,
+  });
+
   return (
     <div
-      className="spot-popup-bottom-sheet"
+      ref={sheetRef}
+      className={`spot-popup-bottom-sheet spot-popup-bottom-sheet-${height}`}
       role="dialog"
       aria-label={spot.name}
+      data-panel-height={height}
     >
       <button
         type="button"
         className="spot-popup-bottom-sheet-handle"
         aria-label={onClose ? "Close" : undefined}
         title="Close"
-        onClick={onClose}
+        data-dragging={isHandleDragging ? "true" : undefined}
+        // Pointer-event handlers drive the drag-to-resize gesture.
+        // A tap (no movement past ~4 px) is forwarded to the click
+        // handler in the hook, which calls `onClose` — matches the
+        // previous tap-to-close UX. A real drag calls
+        // `onHeightChange` with the snapped height key instead of
+        // closing the popup.
+        onPointerDown={onHandlePointerDown}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
+        onPointerCancel={onHandlePointerCancel}
       />
       <div className="spot-popup-bottom-sheet-content">
         <SpotPopupContent

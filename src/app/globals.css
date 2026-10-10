@@ -187,17 +187,31 @@ body {
   border-top-right-radius: 16px;
   box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18);
   padding-bottom: env(safe-area-inset-bottom, 0px);
-  /* Fixed height on mobile. The gray handle bar at the top is
-     used to open/close (collapse/expand) the panel, not to resize it. */
+  /* Default size on mobile. The 3-position drag hook
+   * (`useBottomPanelDrag`) toggles between "default" and
+   * "expanded" by adding `places-panel-expanded` to the root —
+   * only that class changes `height`, so the CSS transition
+   * below animates the resize on snap-release.
+   *
+   * The third position, `"closed"`, is handled at the React
+   * level — HeroMap wraps us in a `bottomPanelHeight !==
+   * "closed"` conditional so the entire panel is unmounted in
+   * the hidden state, and the home page swaps in the "Show
+   * Closest Places" button at the bottom. The previous
+   * `.places-panel-closed` height: 48px class is no longer
+   * applied because we never reach render in that state. */
   height: 400px;
   overflow: hidden;
   animation: hk-places-panel-up 0.32s cubic-bezier(0.16, 1, 0.3, 1);
   transition: height 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Collapsed state — only the handle bar is visible at the bottom */
-.places-panel.collapsed {
-  height: 48px;
+/* Expanded state — twice the default. Caps at 800 px so the
+ * sheet never covers the whole viewport (a full-viewport sheet
+ * would hide the map entirely and make the close affordance
+ * unreachable on small phones in landscape). */
+.places-panel-expanded {
+  height: 800px;
 }
 
 @media (min-width: 768px) {
@@ -342,11 +356,27 @@ body {
 }
 
 /* Floating "recenter on my location" button when the PlacesPanel is open.
-   Positioned above the panel at the bottom-left corner. */
+   Positioned above the panel at the bottom-left corner. The default
+   416 px offset (400 px panel + 16 px gap) covers the panel's
+   default height — the .places-panel-recenter-expanded modifier
+   below covers the expanded (800 px) state. The collapsed (48 px)
+   state used to add its own modifier, but the button is hidden
+   entirely when `bottomPanelHeight === "closed"` (the home page
+   shows the "Show Closest Places" button instead) so no extra
+   style is needed. */
 .places-panel-recenter-float {
   position: absolute;
   left: 12px;
-  bottom: 416px; /* 400px panel height + 16px offset to sit above the panel */
+  /* Sit FLUSH against the top edge of the bottom sheet — no gap.
+     The previous offset of `bottom: <sheet height> + 16px` opened
+     up a visible 16 px band between the button and the sheet
+     whenever the SpotPopup station-time card was on top, which
+     read as the button "floating" away from the rest of the
+     bottom-stack. Anchoring the button at exactly the sheet's
+     top (400 px / 800 px) keeps the recenter control visually
+     attached to the sheet it controls, the way the rest of the
+     mobile floating controls sit on the sheet's edge. */
+  bottom: 410px;
   z-index: 40;
   display: flex;
   align-items: center;
@@ -364,11 +394,12 @@ body {
   transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
 }
 
-/* When the PlacesPanel is collapsed to just the handle bar (48px),
-   park the recenter button just above that tiny bar instead of
-   leaving it floating high where the expanded panel used to be. */
-.places-panel-recenter-collapsed {
-  bottom: 64px !important; /* 48px collapsed panel + 16px offset */
+/* When the PlacesPanel is expanded to 800px (the second of the
+   two visible heights from the 3-position drag hook), park the
+   recenter button just above the taller sheet so it stays
+   reachable. The 16 px gap matches the default modifier above. */
+.places-panel-recenter-expanded {
+  bottom: 800px !important; /* flush with the top of the expanded (800px) sheet */
 }
 
 /* Floating "recenter on my location" button when the PlacesPanel is dismissed.
@@ -687,9 +718,16 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 32px;
-  width: 32px;
-  border-radius: 8px;
+  /* Slightly larger footprint on the SpotPopup bottom sheet so the
+     route affordance reads as a primary action, not a tiny icon
+     in the corner — matches the in-image reference where the
+     "918 林錦公路" pill is the most prominent control in the
+     header. Still 32px on the dense PlacesPanel closest-station
+     card via the `places-panel-station-navigate` (no modifier)
+     usage there. */
+  height: 40px;
+  width: 40px;
+  border-radius: 10px;
   background: transparent;
   color: #6b7280;
   border: 1px solid #e5e7eb;
@@ -725,6 +763,56 @@ body {
   background: #B91C1C;
   color: #fff;
   border-color: #B91C1C;
+}
+
+/* Text-augmented variant of the route button. The base class
+   above is a 32×32 icon-only square; this modifier expands it
+   into a wider pill that renders the localized "Show route" /
+   "Hide route" label next to the icon. We only apply it on the
+   SpotPopup bottom sheet (which has the room — the sheet is
+   ~480px tall and the route button doesn't compete with other
+   left-side controls), NOT on the PlacesPanel closest-station
+   card (where the button sits in a tight row with the station
+   name and would wrap awkwardly if given a label). The label
+   span uses `white-space: nowrap` so Chinese strings like
+   "在地圖上顯示路線" render on a single line, with the gap
+   matching the icon's right edge so the two feel like one
+   affordance rather than two adjacent controls. */
+.places-panel-station-navigate-with-text {
+  /* Expanded from the icon-only 32×32 footprint to a wider, taller
+     pill that hosts the localized "Show route" / "Hide route" label
+     in 13px (vs. 12px before) so the route text reads as a proper
+     button caption rather than a tiny aside. The increased height
+     matches the new icon-button size above (40px) and the
+     accompanying close button, so all three controls in the
+     SpotPopup header now share the same visual weight. */
+  width: auto;
+  height: 40px;
+  padding: 0 14px 0 12px;
+  gap: 6px;
+  border-radius: 10px;
+}
+
+.places-panel-station-navigate-with-text .places-panel-station-navigate-label {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  /* Hide the label on the tightest viewports — the icon alone
+     still gives the user the gesture, and shrinking the button
+     back to its icon-only footprint avoids wrapping or clipping
+     on 320px-wide phones in landscape. */
+}
+
+@media (max-width: 360px) {
+  .places-panel-station-navigate-with-text .places-panel-station-navigate-label {
+    display: none;
+  }
+  .places-panel-station-navigate-with-text {
+    padding: 0;
+    width: 40px;
+    height: 40px;
+  }
 }
 
 /* Walking-time pill — surfaces the Routes API v2 result for the
@@ -1178,11 +1266,37 @@ body {
   /* Match the height of the original bottom tab box (`.places-panel`)
      so the two read as a stacked pair: the popup sheet sits on top
      of the PlacesPanel at the same height, like the Google Maps
-     app's place-details sheet on top of the bottom navigation. */
+     app's place-details sheet on top of the bottom navigation.
+
+     The 3-position drag hook (`useBottomPanelDrag`) toggles
+     between the visible heights by adding
+     `spot-popup-bottom-sheet-expanded` to the root — only that
+     class changes `height`, so the CSS transition below animates
+     the resize on snap-release. The same height key drives both
+     the PlacesPanel and the SpotPopup, so dragging either
+     handle keeps the pair in lockstep.
+
+     The third position, `"closed"`, is handled at the React
+     level — HeroMap wraps us in a `bottomPanelHeight !==
+     "closed"` conditional so the entire sheet is unmounted in
+     the hidden state. The previous
+     `.spot-popup-bottom-sheet-closed` height: 48px class is no
+     longer applied because we never reach render in that state.
+     */
   bottom: 0;
   z-index: 40;
   display: flex;
   flex-direction: column;
+  /* Match the height of the original bottom tab box
+     (`.places-panel` = 400 px default / 800 px expanded) so the
+     station-time popup reads as the same widget family as the
+     closest-stations tab below it. The 480 px / 880 px heights
+     that were briefly used here produced a visibly TALLER card
+     than the original PlacesPanel and pushed the recenter-on-user
+     button noticeably higher on the screen, opening up an awkward
+     gap between the button and the top of the sheet. Keeping the
+     two sheets at the same px height preserves the stacked-card
+     look the rest of the home page was designed around. */
   height: 400px;
   background: rgba(255, 255, 255, 0.98);
   backdrop-filter: blur(12px);
@@ -1193,19 +1307,71 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
   overflow: hidden;
   animation: hk-spot-popup-up 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: height 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Expanded state — twice the default, matches PlacesPanel. */
+.spot-popup-bottom-sheet-expanded {
+  height: 800px;
 }
 
 @media (min-width: 768px) {
   .spot-popup-bottom-sheet {
     /* On desktop the PlacesPanel is a right sidebar (right: 96px,
        width: 420px), so the bottom sheet can stretch across the
-       rest of the map area without occluding the sidebar. */
+       rest of the map area without occluding the sidebar. The
+       12px bottom gap (vs. 0 on mobile) gives the rounded card
+       room to float above the bottom edge of the map container,
+       matching the original info-window look — mobile uses
+       bottom: 0 because the sheet IS the bottom edge. */
     right: 96px;
     max-width: 720px;
     border-radius: 16px;
-    bottom: 16px;
+    bottom: 12px;
     box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18), 0 4px 12px rgba(0, 0, 0, 0.08);
   }
+}
+
+/* Close button — rightmost element in the SpotPopup bottom sheet's
+   header row. Sits next to the route / navigate button so the
+   affordance to dismiss the popup is always reachable, regardless
+   of whether a route is currently active or not. The previous
+   implementation relied on the drag handle as a tap-to-close
+   affordance, which broke whenever the user dragged the handle
+   more than a few pixels and made it easy to dismiss the spot
+   accidentally while trying to resize. The dedicated X button is
+   now the canonical close path, and tapping it routes through
+   `onClose` → `dismissSelectedSpot` in `HeroMap`, which also clears
+   any polyline drawn for the spot (same end-state as tapping the
+   route toggle while a route is active). The button is bumped from
+   32×32 to 40×40 so the close affordance is on par with the route
+   button (40×40) and reads as a peer action — the previous
+   32×32 size next to a 40×40 route pill would have looked
+   mismatched in the in-image layout where both sit in the same row. */
+.spot-popup-bottom-sheet-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  background: rgba(243, 244, 246, 0.95);
+  color: #4b5563;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+  padding: 0;
+}
+
+.spot-popup-bottom-sheet-close:hover {
+  background: #e5e7eb;
+  color: #111827;
+}
+
+.spot-popup-bottom-sheet-close:active {
+  transform: scale(0.92);
 }
 
 .spot-popup-bottom-sheet-handle {
@@ -1217,9 +1383,21 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
+  /* The handle doubles as a drag target for the 3-position resize
+   * (see `useBottomPanelDrag`). `grab` signals "draggable" to the
+   * user; the JS hook flips it to `grabbing` mid-gesture via
+   * `[data-dragging="true"]` below. `touch-action: none` keeps
+   * the browser from intercepting the vertical drag as a page
+   * scroll, which would otherwise fight the resize gesture on
+   * touch devices. */
+  cursor: grab;
+  touch-action: none;
   -webkit-tap-highlight-color: transparent;
   padding: 0;
+}
+
+.spot-popup-bottom-sheet-handle[data-dragging="true"] {
+  cursor: grabbing;
 }
 
 .spot-popup-bottom-sheet-handle::before {

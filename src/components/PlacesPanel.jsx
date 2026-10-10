@@ -24,9 +24,19 @@
  * vertical icon rail on the right can also switch tabs. The `dismissed`
  * prop collapses the panel entirely (mobile dismiss button, desktop close
  * button).
+ *
+ * Bottom-sheet height is controlled externally (`height` +
+ * `onHeightChange`) and snaps to one of three positions:
+ *   - "closed"   → 48 px   (handle bar only)
+ *   - "default"  → 400 px  (current production height)
+ *   - "expanded" → 800 px  (twice the default)
+ * Drag the gray handle at the top of the sheet up/down to switch
+ * positions. On release the height snaps to the nearest of the three
+ * positions; the sheet can never land outside them. See
+ * `useBottomPanelDrag` for the drag mechanics.
  */
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
   Toilet,
   MapPin,
@@ -43,6 +53,9 @@ import {
 import { pickRouteBadge } from "@/lib/transportColors";
 import { useLocale } from "@/contexts/LocaleContext";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import {
+  useBottomPanelDrag,
+} from "@/hooks/useBottomPanelDrag";
 
 const NEARBY_ROW_STYLE = {
   toilets: { Icon: Toilet, iconBg: "bg-[#f0fdfa]", iconColor: "#0F766E" },
@@ -177,12 +190,15 @@ export default function PlacesPanel({
   nearbyToilets = [],
   frequentPlaces = [],
   onClearFrequent,
-  dismissed = false,
-  onDismiss,
   tab: controlledTab,
   onTabChange,
-  isCollapsed: controlledCollapsed,
-  onToggleCollapse,
+  // 3-position height state for the mobile bottom sheet. Reads the
+  // same enum ('closed' | 'default' | 'expanded') as the SpotPopup
+  // so dragging either handle keeps both sheets in lockstep.
+  // Desktop sidebar (>= md) ignores this — it always uses the full
+  // viewport height.
+  height = "default",
+  onHeightChange,
 }) {
   const [internalTab, setInternalTab] = useState("closest");
   const activeTab = controlledTab ?? internalTab;
@@ -201,14 +217,42 @@ export default function PlacesPanel({
     if (typeof onTabChange === "function") onTabChange(newTab);
   };
 
-  const [internalCollapsed, setInternalCollapsed] = useState(false);
-  const isPanelCollapsed = controlledCollapsed ?? internalCollapsed;
+  // Ref to the sheet's outer DOM node. The drag hook writes the
+  // live drag height to `sheet.style.height` so the pointer moves
+  // are reflected on-screen without a React render in the middle of
+  // the gesture.
+  const sheetRef = useRef(null);
 
-  const handleToggleCollapse = () => {
-    const next = !isPanelCollapsed;
-    if (controlledCollapsed === undefined) setInternalCollapsed(next);
-    if (typeof onToggleCollapse === "function") onToggleCollapse(next);
-  };
+  // Drag handlers for the gray handle at the top of the mobile
+  // sheet. Reads the current `height` as the starting position;
+  // calls `onHeightChange` with the snapped key on release. A pure
+  // tap (no drag past the threshold) collapses the sheet to the
+  // "closed" position — same UX as the previous tap-to-dismiss
+  // behaviour, just expressed through the new 3-position state
+  // instead of a separate `dismissed` boolean. HeroMap unmounts
+  // the panel at "closed" and the home page shows the "Show
+  // Closest Places" button so the user can recover.
+  const {
+    onPointerDown: onHandlePointerDown,
+    onPointerMove: onHandlePointerMove,
+    onPointerUp: onHandlePointerUp,
+    onPointerCancel: onHandlePointerCancel,
+    isDragging: isHandleDragging,
+  } = useBottomPanelDrag({
+    height,
+    onHeightChange,
+    // Tapping the handle (with no drag) collapses the sheet.
+    // Always snap to "closed" on tap — HeroMap renders the panel
+    // out of the DOM at that height, and the home page swaps in
+    // the "Show Closest Places" button. The user can re-open
+    // either from that button or from the right-rail icons.
+    onClick: () => {
+      if (height !== "closed" && typeof onHeightChange === "function") {
+        onHeightChange("closed");
+      }
+    },
+    sheetRef,
+  });
 
   // ----- Closest-station ETA fetching -----
   // Fetches /api/<transport>/eta for every station in the candidate
@@ -478,7 +522,12 @@ export default function PlacesPanel({
     [frequentPlaces]
   );
 
-  if (dismissed) return null;
+  // The `dismissed` early-return is gone — HeroMap now wraps us in
+  // a `bottomPanelHeight !== "closed"` conditional so the entire
+  // panel is unmounted in the hidden state. By the time we reach
+  // this render we're guaranteed to be visible at default or
+  // expanded; the `places-panel-${height}` class on the root div
+  // still flips between the two heights for CSS.
 
   // ----- Closest Station tab -----
   // Renders one card per top-5 closest station inside the same
@@ -898,18 +947,41 @@ export default function PlacesPanel({
 
   const currentTab = TABS.find((tt) => tt.key === activeTab) ?? TABS[0];
 
+  // Compose the sheet class list. `.places-panel` always sits on
+  // the root; the modifier classes pick the height position
+  // (`closed` / `expanded`) and re-add the dragging cursor. The
+  // `hidden` modifier on the content area is left to CSS — we no
+  // longer toggle it via JS, because the height jump on snap from
+  // "closed" to "default" reveals the content as the panel grows
+  // (CSS transition handles it).
+  const panelClassName = `places-panel places-panel-${height}`;
+
   return (
     <div
-      className="places-panel"
+      ref={sheetRef}
+      className={panelClassName}
       role="region"
       aria-label={t(currentTab.labelKey)}
+      // Mark the data-state so CSS can react to the current height
+      // without re-deriving it from a class list. Kept in sync with
+      // the class above; useful for debugging and for any selector
+      // that prefers data-attributes.
+      data-panel-height={height}
     >
       <div
         className="places-panel-handle md:hidden"
         role="button"
-        aria-label={t("bottomSheetDismiss")}
-        title={t("bottomSheetDismiss")}
-        onClick={onDismiss}
+        aria-label={t("bottomSheetSizeHandle")}
+        title={t("bottomSheetSizeHandle")}
+        data-dragging={isHandleDragging ? "true" : undefined}
+        // Pointer-event handlers drive the drag-to-resize gesture.
+        // A tap (no movement past ~4 px) is forwarded to the click
+        // handler in the hook, which collapses / re-expands the
+        // sheet — matches the previous tap-to-collapse UX.
+        onPointerDown={onHandlePointerDown}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
+        onPointerCancel={onHandlePointerCancel}
       />
 
       <div className="places-panel-tabs" role="tablist">
@@ -950,7 +1022,12 @@ export default function PlacesPanel({
         })}
       </div>
 
-      <div className={`places-panel-content ${isPanelCollapsed ? "hidden" : ""}`}>
+      <div
+        className={`places-panel-content ${height === "closed" ? "hidden" : ""}`}
+        // aria-hidden keeps the tab content out of the a11y tree
+        // while the sheet is collapsed to the handle bar only.
+        aria-hidden={height === "closed"}
+      >
         {activeTab === "closest" && renderClosestContent()}
         {activeTab === "nearby" && renderNearbyContent()}
         {activeTab === "frequent" && renderFrequentContent()}
