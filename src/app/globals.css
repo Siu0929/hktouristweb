@@ -346,7 +346,7 @@ body {
 .places-panel-recenter-float {
   position: absolute;
   left: 12px;
-  bottom: 336px; /* 320px panel height + 16px offset to sit above the panel */
+  bottom: 416px; /* 400px panel height + 16px offset to sit above the panel */
   z-index: 40;
   display: flex;
   align-items: center;
@@ -362,6 +362,13 @@ body {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+/* When the PlacesPanel is collapsed to just the handle bar (48px),
+   park the recenter button just above that tiny bar instead of
+   leaving it floating high where the expanded panel used to be. */
+.places-panel-recenter-collapsed {
+  bottom: 64px !important; /* 48px collapsed panel + 16px offset */
 }
 
 /* Floating "recenter on my location" button when the PlacesPanel is dismissed.

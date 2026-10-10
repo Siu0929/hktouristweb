@@ -32,7 +32,7 @@ import {
   Ship,
 } from "lucide-react";
 
-import SearchBar from "@/components/SearchBar";
+import SearchBar from "@/components/SearchBar/SearchBar";
 import {
   addFrequentPlace,
   clearFrequentPlaces,
