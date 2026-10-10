@@ -1,0 +1,1256 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  --tab-bar-height: 3.5rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+  overscroll-behavior: none;
+}
+
+/* Mobile app shell — safe areas for notched phones */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide Google Maps InfoWindow default close button */
+.gm-style-iw > button {
+  display: none !important;
+}
+
+/* Remove default InfoWindow padding and spacing */
+.gm-style-iw-c {
+  padding-top: 0 !important;
+}
+
+.gm-style-iw-dv {
+  overflow: hidden !important;
+}
+
+.custom-info-window .gm-style-iw {
+  padding: 0 !important;
+  border-radius: 8px !important;
+}
+
+.custom-info-window .gm-style-iw-c {
+  padding: 0 !important;
+  overflow: visible !important;
+}
+
+.custom-info-window .gm-style-iw-chr {
+  display: none !important;
+}
+
+.custom-info-window .gm-style-iw-dv {
+  overflow: hidden !important;
+}
+
+.custom-info-window .gm-style-iw-ta {
+  display: none !important;
+}
+
+/* Pulsing ring for the searched/selected station — drawn behind the
+   AdvancedMarkerElement dot so the map stays the hero. The ring scales
+   up and fades on a 1.6s loop so the eye immediately lands on the chosen
+   marker even when dozens of dots surround it. */
+@keyframes hk-marker-pulse {
+  0%   { transform: scale(1);   opacity: 0.65; }
+  70%  { transform: scale(2.4); opacity: 0;    }
+  100% { transform: scale(2.4); opacity: 0;    }
+}
+
+.hk-marker-pulse-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 3px solid #ef4444;
+  animation: hk-marker-pulse 1.6s ease-out infinite;
+  pointer-events: none;
+}
+
+/* When a search station is "active", dim everything that is not the
+   target. The map's base tiles are left at full opacity so the user
+   still gets a clear sense of place — only the markers dim. */
+.hk-marker-dim {
+  opacity: 0.35 !important;
+  transition: opacity 0.2s ease;
+}
+
+.hk-marker-highlight {
+  z-index: 1000;
+  transition: transform 0.18s ease;
+}
+
+/* Layer toggle chips — pill-shaped, sits top-right of the map. Active
+   chips use a tinted background that mirrors the category swatch so
+   the map colour-codes match. */
+.hk-layer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.95);
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2937;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(229, 231, 235, 0.9);
+  transition: all 0.15s ease;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hk-layer-chip:hover {
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16);
+}
+
+.hk-layer-chip[data-active="true"] {
+  background: var(--hk-layer-color, #1E40AF);
+  color: #fff;
+  border-color: transparent;
+}
+
+.hk-layer-chip[data-active="false"] .hk-layer-swatch {
+  opacity: 0.45;
+}
+
+.hk-layer-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: var(--hk-layer-color, #1E40AF);
+  transition: opacity 0.15s ease;
+}
+
+/* ------------------------------------------------------------------
+   PlacesPanel — unified "lists" surface for the home page.
+
+   On mobile (< md) it renders as a bottom sheet at the bottom of the
+   map: rounded top corners, drag handle, capped height. On desktop
+   (>= md) it floats as a right sidebar to the LEFT of the vertical
+   icon rail: full height, fixed width, vertical scroll inside.
+
+   The same JSX is reused for both layouts — only positioning differs.
+------------------------------------------------------------------ */
+@keyframes hk-places-panel-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.places-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  /* Fixed height on mobile. The gray handle bar at the top is
+     used to open/close (collapse/expand) the panel, not to resize it. */
+  height: 400px;
+  overflow: hidden;
+  animation: hk-places-panel-up 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: height 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Collapsed state — only the handle bar is visible at the bottom */
+.places-panel.collapsed {
+  height: 48px;
+}
+
+@media (min-width: 768px) {
+  .places-panel {
+    position: absolute;
+    top: 0;
+    right: 96px; /* leave room for the right-edge icon rail */
+    bottom: 0;
+    left: auto;
+    width: 420px;
+    max-width: 50vw;
+    max-height: none;
+    /* Desktop sidebar uses the full viewport height; explicitly reset
+       the user-draggable height variable so dragging on a phone that
+       later resizes to desktop doesn't leave a stuck px height. */
+    height: 100%;
+    border-radius: 0;
+    border-left: 1px solid #e5e7eb;
+    box-shadow: -6px 0 24px rgba(0, 0, 0, 0.10);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    animation: none;
+  }
+}
+
+.places-panel-handle {
+  width: 48px;
+  height: 16px;
+  border-radius: 9999px;
+  background: transparent;
+  margin: 6px auto 4px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none; /* disable browser pan/zoom so vertical drag is clean */
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.places-panel-handle::before {
+  content: "";
+  width: 36px;
+  height: 4px;
+  border-radius: 9999px;
+  background: #d1d5db;
+  transition: background 120ms ease, width 120ms ease;
+}
+
+.places-panel-handle:hover::before,
+.places-panel-handle:active::before {
+  background: #9ca3af;
+}
+
+.places-panel-handle:active::before {
+  width: 44px;
+}
+
+.places-panel-handle[data-dragging="true"] {
+  cursor: grabbing;
+}
+
+@media (min-width: 768px) {
+  .places-panel-handle {
+    display: none;
+  }
+}
+
+.places-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px 6px;
+  flex-shrink: 0;
+}
+
+.places-panel-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1f2937;
+  line-height: 1.2;
+}
+
+@media (min-width: 768px) {
+  .places-panel-title {
+    font-size: 18px;
+  }
+}
+
+.places-panel-subtitle {
+  font-size: 11px;
+  font-weight: 500;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+.places-panel-close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  width: 28px;
+  border-radius: 9999px;
+  color: #6b7280;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.places-panel-close:hover {
+  background: #f3f4f6;
+  color: #1f2937;
+}
+
+/* Floating close button that replaces the in-header close button on mobile.
+   Positioned absolute in the top-right corner so the header row can be
+   removed, saving vertical space for content. */
+.places-panel-close-float {
+  position: absolute;
+  top: 6px;
+  right: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  width: 28px;
+  border-radius: 9999px;
+  color: #9ca3af;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.places-panel-close-float:hover {
+  background: #f3f4f6;
+  color: #1f2937;
+}
+
+/* Floating "recenter on my location" button when the PlacesPanel is open.
+   Positioned above the panel at the bottom-left corner. */
+.places-panel-recenter-float {
+  position: absolute;
+  left: 12px;
+  bottom: 336px; /* 320px panel height + 16px offset to sit above the panel */
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #1E40AF;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+/* Floating "recenter on my location" button when the PlacesPanel is dismissed.
+   Anchored to the bottom-left corner of the map. */
+.places-panel-recenter-docked {
+  bottom: 16px !important;
+}
+
+.places-panel-recenter-float:hover {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.places-panel-recenter-float:active {
+  transform: scale(0.92);
+}
+
+.places-panel-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px 12px 8px;
+  flex-shrink: 0;
+}
+
+.places-panel-tab {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+@media (min-width: 768px) {
+  .places-panel-tab {
+    font-size: 13px;
+    padding: 10px 12px;
+  }
+}
+
+.places-panel-tab:hover {
+  background: #f9fafb;
+  color: #374151;
+}
+
+.places-panel-tab-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  /* Tabs now carry both an icon and a small label below it, so
+     the tab needs a bit more vertical room than the old
+     icon-only version. `line-height: 1` keeps the label from
+     adding unexpected slack between the icon and the text. */
+  line-height: 1;
+}
+
+.places-panel-tab-label {
+  font-size: 12px;
+  font-weight: 600;
+  /* Allow the label to use up to two lines on narrow widths so a
+     longer word like "Frequent" never silently overflows the
+     fixed-width tab. Two lines is enough for every existing
+     label (which are all single-word, even in the long-tail
+     locales) and the leading `white-space: nowrap` keeps the
+     common single-line path from accidentally breaking on
+     spaces. */
+  white-space: nowrap;
+  line-height: 1.1;
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (min-width: 768px) {
+  .places-panel-tab-label {
+    font-size: 13px;
+  }
+}
+
+.places-panel-tab-active {
+  background: #eff6ff;
+  color: #1E40AF;
+  border-color: #dbeafe;
+}
+
+.places-panel-tab-active:hover {
+  background: #eff6ff;
+  color: #1E40AF;
+}
+
+.places-panel-content {
+  flex: 1;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  display: flex;
+  gap: 12px;
+  padding: 8px 16px 12px;
+  /* Hide horizontal scrollbar visually but keep it functional so the user
+     can swipe to see more cards without taking up extra vertical space. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.places-panel-content::-webkit-scrollbar {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .places-panel-content {
+    padding: 16px 24px 20px;
+  }
+}
+
+.places-panel-empty {
+  border-radius: 12px;
+  border: 1px dashed #e5e7eb;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 20px 16px;
+  text-align: center;
+  /* Fill the panel's content area. `.places-panel-content` is a
+     horizontal flex container so a plain child would otherwise
+     shrink to its content width (the dashed card visibly leaves
+     empty space on the right on mobile). `min-width: 0` keeps
+     flexbox from re-introducing an intrinsic min-content size
+     that would cap the expansion. */
+  width: 100%;
+  min-width: 0;
+}
+
+/* Closest-station card — same visual as the legacy bottom-sheet card so
+   the tab content matches the previous mobile experience. On mobile the
+   cards lay out horizontally inside the scroll container, so each card
+   gets a fixed width but stretches to fill the content area's full
+   height (via `align-items: stretch` on .places-panel-content). The
+   inner layout pushes the route pill + wait time down into a "stack"
+   at the bottom, so each tile reads as a mini timetable panel that
+   uses the entire bottom sheet rather than a compact card stranded
+   at the top with empty space below. */
+.places-panel-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex: 0 0 auto;
+  width: 240px;
+  max-width: 80vw;
+  height: 100%;
+  /* Each card fills the row's cross-axis (vertical) so it spans the
+     full height of the bottom sheet's content area. The inner button
+     wraps the actual content. */
+}
+
+.places-panel-card-button {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  min-height: 0;
+}
+
+.places-panel-card-eta-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+
+.places-panel-card-eta-stack .route-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.places-panel-card-eta-stack .eta-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1E40AF;
+  line-height: 1.2;
+}
+
+.places-panel-card:hover {
+  border-color: #1E40AF;
+  box-shadow: 0 2px 8px rgba(30, 64, 175, 0.16);
+}
+
+.places-panel-card[data-selected="true"] {
+  border-color: #1E40AF;
+  background: #eff6ff;
+}
+
+/* Closest-Station tab — single full-width card inside the horizontal
+   scroll container. `flex: 1` + `min-width: 0` makes the card stretch
+   across the entire content area on both mobile and desktop. The inner
+   ETA list scrolls vertically if it overflows the available height. */
+.places-panel-station-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 100%;
+  min-width: 0;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.places-panel-station-card:hover {
+  border-color: #1E40AF;
+  box-shadow: 0 4px 10px rgba(30, 64, 175, 0.16);
+}
+
+.places-panel-station-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.places-panel-station-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  height: 36px;
+  width: 36px;
+  border-radius: 10px;
+  background: #1D4ED8;
+  box-shadow: 0 1px 3px rgba(29, 78, 216, 0.25);
+}
+
+.places-panel-station-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.places-panel-station-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1f2937;
+  line-height: 1.2;
+  /* Allow up to two lines when the name overflows the first line's
+     width; long names (e.g. "TAI NAN WEST STREET, SHAM SHUI PO") would
+     otherwise be chopped off by ellipsis. `overflow-wrap: anywhere`
+     keeps mixed Chinese / English strings from forcing a single
+     unbroken word past the container edge. */
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+@media (min-width: 768px) {
+  .places-panel-station-name {
+    font-size: 15px;
+  }
+}
+
+.places-panel-station-distance {
+  font-size: 11px;
+  font-weight: 500;
+  color: #6b7280;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.places-panel-station-navigate {
+  /* Ghost-styled by default so this button no longer competes
+     for attention with the bookmark action. The previously solid
+     `#1E40AF` fill made the navigate button the visually heaviest
+     element on the tile even when no route was drawn, so users
+     kept treating it as "the main action" instead of the
+     bookmark that actually saves the stop to Frequent Places. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  width: 32px;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b7280;
+  border: 1px solid #e5e7eb;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.places-panel-station-navigate:hover {
+  background: #f3f4f6;
+  color: #1f2937;
+  border-color: #d1d5db;
+}
+
+.places-panel-station-navigate:active {
+  transform: scale(0.92);
+}
+
+/* When the in-app route for this card is currently drawn on the
+   map, the button flips to an "active" appearance so the user knows
+   the polyline is theirs to dismiss with a second tap. We also use
+   an X icon inside the button in that state. The active style is
+   kept deliberately louder than the ghost default — at this point
+   the route is on the map and the user explicitly needs to
+   acknowledge it. */
+.places-panel-station-navigate-active {
+  background: #DC2626;
+  color: #fff;
+  border-color: #DC2626;
+}
+
+.places-panel-station-navigate-active:hover {
+  background: #B91C1C;
+  color: #fff;
+  border-color: #B91C1C;
+}
+
+/* Walking-time pill — surfaces the Routes API v2 result for the
+   currently-drawn route (e.g. "🚶 5 min · 350 m"). Previously
+   rendered as a sibling of the navigate button on
+   `places-panel-station-tile-header`; moved to the SpotPopup
+   bottom sheet (see `SpotPopup.jsx`) so the time / distance
+   readout now lives next to the station's route button rather
+   than on the closest-stations tab. The class is retained here
+   for reference but is currently unused. */
+.places-panel-station-route-walking {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* "Save to Frequent Places" pin button — the visually highlighted
+   action on the station tile. Filled blue when the station is
+   already pinned so users can see the saved state at a glance;
+   outlined blue when it isn't pinned yet, so the affordance
+   remains obvious against the rest of the card. */
+.places-panel-station-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  width: 32px;
+  border-radius: 8px;
+  background: transparent;
+  color: #1E40AF;
+  border: 1px solid #1E40AF;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.places-panel-station-pin:hover {
+  background: #eff6ff;
+}
+
+.places-panel-station-pin:active {
+  transform: scale(0.92);
+}
+
+/* Pinned state — same blue identity, but with a filled bookmark
+   glyph and a solid blue background. Same approach as the popup
+   tag in SpotPopup.jsx so the same station looks the same
+   whether the user finds it via the bottom card or via the map. */
+.places-panel-station-pin-active {
+  background: #1E40AF;
+  color: #fff;
+  border-color: #1E40AF;
+}
+
+.places-panel-station-pin-active:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.places-panel-station-eta-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid #f3f4f6;
+  flex-shrink: 0;
+}
+
+.places-panel-station-eta-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1E40AF;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.places-panel-station-eta-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+}
+
+.places-panel-station-eta-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.places-panel-station-eta-list::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 9999px;
+}
+
+.places-panel-station-eta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: #f9fafb;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.places-panel-station-eta-route {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.places-panel-station-eta-dest {
+  flex: 1;
+  min-width: 0;
+  color: #374151;
+  font-weight: 500;
+  /* Same wrapping rule as `.places-panel-station-name`: allow up to two
+     lines for long destination names (e.g. "KENNEDY TOWN → ...", or a
+     long Chinese terminus) instead of clipping with an ellipsis. */
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.places-panel-station-eta-min {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1D4ED8;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 48px;
+}
+
+.places-panel-station-no-eta {
+  padding: 12px 8px;
+  font-size: 12px;
+  color: #6b7280;
+  text-align: center;
+}
+
+.places-panel-station-empty {
+  border-radius: 12px;
+  border: 1px dashed #e5e7eb;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 20px 16px;
+  text-align: center;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Closest-Station tab — horizontal list of up to 5 station tiles that
+   scroll inside `.places-panel-content`. Each tile reuses the visual
+   pattern of the legacy single-card view (header row with transport
+   icon + name + distance + navigate button, ETA stack underneath),
+   but is sized as a fixed-width card so multiple stations are visible
+   side-by-side on wide screens while still being swipeable on mobile. */
+.places-panel-station-list {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+}
+
+.places-panel-station-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 auto;
+  width: 240px;
+  max-width: 80vw;
+  height: 100%;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.places-panel-station-tile:hover {
+  border-color: #1E40AF;
+  box-shadow: 0 4px 10px rgba(30, 64, 175, 0.16);
+}
+
+.places-panel-station-tile-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* Nearby / Frequent row — uniform row style across the two list tabs so
+   the panel reads as one continuous surface. On mobile the rows lay out
+   horizontally inside the scroll container; each row gets a fixed width
+   so 1–2 cards are visible at a time and the user can swipe to see more. */
+.places-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  padding: 16px;
+  text-align: left;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.04);
+  transition: all 0.15s ease;
+  flex: 0 0 auto;
+  width: 260px;
+  max-width: 80vw;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.places-panel-row:hover {
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+}
+
+.places-panel-row:active {
+  transform: scale(0.99);
+}
+
+/* Tile variant for Nearby / Frequent cards: vertical layout with a square
+   icon block on top (filling the inner width — same horizontal padding as
+   the tile itself), the place name underneath, and two quick-action
+   buttons for navigation / focusing on the map. */
+.places-panel-tile {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  width: 180px;
+  max-width: 80vw;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.15s ease;
+}
+
+.places-panel-tile:hover {
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+}
+
+.places-panel-tile-icon {
+  width: 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.places-panel-tile-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1f2937;
+  line-height: 1.25;
+  margin: 0 0 8px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.5em;
+}
+
+.places-panel-tile-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.places-panel-tile-action {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  color: #1f2937;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.places-panel-tile-action:hover {
+  background: #eff6ff;
+  border-color: #1E40AF;
+  color: #1E40AF;
+}
+
+.places-panel-tile-action:active {
+  transform: scale(0.97);
+}
+
+.places-panel-tile-action--primary {
+  background: #1E40AF;
+  border-color: #1E40AF;
+  color: #fff;
+}
+
+.places-panel-tile-action--primary:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+
+/* Legacy bottom-sheet styles — kept so the previous "StationBottomSheet"
+   class names don't 404 if anything else still references them. They
+   are no longer used by the home page, which now renders PlacesPanel. */
+.hk-bottom-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18);
+  padding: 8px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  max-height: 50vh;
+  overflow: hidden;
+  display: none; /* superseded by .places-panel */
+}
+
+.hk-bottom-sheet-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 9999px;
+  background: #d1d5db;
+  margin: 4px auto 8px;
+}
+
+.hk-bottom-sheet-card {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .hk-bottom-sheet-card {
+    display: flex;
+  }
+}
+
+/* "To:" destination input — sits above the bottom sheet and matches its
+   visual language so the two stack cleanly. */
+.hk-destination-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.hk-destination-pill input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  min-width: 80px;
+  flex: 1;
+}
+
+.hk-destination-pill input::placeholder {
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* =============================================================================
+   SpotPopup bottom sheet
+   =============================================================================
+   The SpotPopup used to be a small floating "tag" anchored to a marker's
+   lat/lng via `OverlayView`. It now renders as a bottom sheet that sits
+   on top of the original bottom tab box (`.places-panel`) — the same
+   pattern as the Google Maps app, where tapping a place opens a details
+   sheet above the bottom navigation.
+
+   The sheet uses a higher z-index than `.places-panel` (z-30) so it
+   stacks above the original tab box without occluding it completely:
+   on mobile the PlacesPanel is 320px tall, and the SpotPopup uses a
+   smaller, auto-height sheet anchored just above it. On desktop the
+   PlacesPanel is a right sidebar; the SpotPopup still uses the same
+   bottom-anchored layout, sitting at the bottom of the map area.
+*/
+
+@keyframes hk-spot-popup-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.spot-popup-bottom-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* Match the height of the original bottom tab box (`.places-panel`)
+     so the two read as a stacked pair: the popup sheet sits on top
+     of the PlacesPanel at the same height, like the Google Maps
+     app's place-details sheet on top of the bottom navigation. */
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  height: 400px;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  overflow: hidden;
+  animation: hk-spot-popup-up 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (min-width: 768px) {
+  .spot-popup-bottom-sheet {
+    /* On desktop the PlacesPanel is a right sidebar (right: 96px,
+       width: 420px), so the bottom sheet can stretch across the
+       rest of the map area without occluding the sidebar. */
+    right: 96px;
+    max-width: 720px;
+    border-radius: 16px;
+    bottom: 16px;
+    box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18), 0 4px 12px rgba(0, 0, 0, 0.08);
+  }
+}
+
+.spot-popup-bottom-sheet-handle {
+  width: 100%;
+  height: 24px;
+  border: none;
+  background: transparent;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  padding: 0;
+}
+
+.spot-popup-bottom-sheet-handle::before {
+  content: "";
+  width: 36px;
+  height: 4px;
+  border-radius: 9999px;
+  background: #d1d5db;
+  transition: background 120ms ease, width 120ms ease;
+}
+
+.spot-popup-bottom-sheet-handle:hover::before {
+  background: #9ca3af;
+}
+
+.spot-popup-bottom-sheet-content {
+  flex: 1;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: auto;
+  /* The SpotPopupContent uses inline styles with min/max widths
+     (minWidth: 240px, maxWidth: 320px). On the bottom sheet we
+     want the content to fill the sheet's width instead, so we
+     override those constraints here. */
+  padding: 0 16px 16px;
+}
+
+/* Override the inline min/max width on the SpotPopupContent's outer
+   div so it stretches to fill the bottom sheet rather than clipping
+   to 240–320px. The inline style sets `minWidth: 240px` and
+   `maxWidth: 320px`; we widen the max to match the sheet and let
+   the content breathe. */
+.spot-popup-bottom-sheet-content > div {
+  min-width: 0 !important;
+  max-width: none !important;
+  width: 100%;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
