@@ -301,10 +301,17 @@ function EtasPanel({ endpoint, stopId, locale, t }) {
                 // pushed to the right edge; on a wrapped row it sits
                 // at the right end of the new line.
                 flexWrap: "wrap",
-                padding: "4px 8px",
+                padding: "6px 10px",
                 background: "#f9fafb",
                 borderRadius: 8,
-                fontSize: 12,
+                // Bumped from 12 → 14 so the route name (which
+                // inherits from this row) reads at the same size as
+                // the route-number badge and ETA chips next to it.
+                // A row that mixes an 11px badge with a 14px name
+                // ends up looking like a small caption floating
+                // next to a proper label, which is the opposite of
+                // what we want for a transit ETA card.
+                fontSize: 14,
               }}
             >
               <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
@@ -312,13 +319,15 @@ function EtasPanel({ endpoint, stopId, locale, t }) {
                   <span
                     style={{
                       display: "inline-block",
-                      minWidth: 28,
-                      padding: "1px 6px",
-                      borderRadius: 6,
+                      minWidth: 40,
+                      padding: "3px 9px",
+                      borderRadius: 8,
                       background: routeBadge.bg,
                       color: routeBadge.textColor,
                       fontWeight: 700,
-                      fontSize: 11,
+                      fontSize: 14,
+                      lineHeight: 1.2,
+                      letterSpacing: 0.2,
                       textAlign: "center",
                       flexShrink: 0,
                     }}
@@ -329,7 +338,7 @@ function EtasPanel({ endpoint, stopId, locale, t }) {
                 <span
                   style={{
                     color: "#374151",
-                    fontWeight: 500,
+                    fontWeight: 600,
                     // Allow the terminus to wrap onto a second line
                     // when the row is narrow (e.g. on mobile, or when
                     // three ETA chips crowd the right edge). The
@@ -351,6 +360,11 @@ function EtasPanel({ endpoint, stopId, locale, t }) {
                     overflow: "hidden",
                     minWidth: 0,
                     flex: 1,
+                    // Line-height tuned to match the larger route
+                    // badge and ETA chips so the row's vertical
+                    // rhythm stays even when a wrapped two-line
+                    // terminus lines up against a single-line badge.
+                    lineHeight: 1.35,
                   }}
                   title={destText}
                 >
@@ -373,8 +387,14 @@ function EtasPanel({ endpoint, stopId, locale, t }) {
                   <span
                     style={{
                       fontVariantNumeric: "tabular-nums",
-                      fontWeight: 600,
+                      fontWeight: 700,
                       color: "#9ca3af",
+                      padding: "3px 8px",
+                      borderRadius: 8,
+                      fontSize: 14,
+                      lineHeight: 1.2,
+                      minWidth: 44,
+                      textAlign: "center",
                     }}
                   >
                     —
@@ -387,11 +407,12 @@ function EtasPanel({ endpoint, stopId, locale, t }) {
                       fontVariantNumeric: "tabular-nums",
                       fontWeight: idx === 0 ? 700 : 500,
                       color: idx === 0 ? "#1D4ED8" : "#6b7280",
-                      padding: "1px 6px",
-                      borderRadius: 6,
+                      padding: "3px 8px",
+                      borderRadius: 8,
                       background: idx === 0 ? "#dbeafe" : "transparent",
-                      fontSize: 11,
-                      minWidth: 36,
+                      fontSize: 14,
+                      lineHeight: 1.2,
+                      minWidth: 48,
                       textAlign: "center",
                     }}
                     title={eta.eta ? new Date(eta.eta).toLocaleString() : undefined}
